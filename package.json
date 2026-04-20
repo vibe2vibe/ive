@@ -1,0 +1,24 @@
+{
+  "name": "ive",
+  "version": "1.0.0",
+  "description": "Integrated Vibecoding Environment — multi-session terminal orchestration for Claude Code & Gemini CLI",
+  "bin": {
+    "ive": "./start.sh"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vibe2vibe/ive.git"
+  },
+  "keywords": [
+    "claude",
+    "gemini",
+    "terminal",
+    "orchestration",
+    "ai",
+    "agent",
+    "cli",
+    "vibecoding"
+  ],
+  "author": "v77.ai",
+  "license": "MIT"
+}
