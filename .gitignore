@@ -40,7 +40,7 @@ research/
 
 # Videos / screenshots (large assets)
 video/
-screenshots/
+/screenshots/
 
 # Env files
 .env
