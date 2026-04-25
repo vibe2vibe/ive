@@ -24,6 +24,11 @@ _broadcast_fn = None
 # Per-workspace lock prevents concurrent dispatch races
 _dispatch_locks: dict[str, asyncio.Lock] = {}
 
+# Circuit breaker: stop dispatching if too many tasks are pending
+MAX_PENDING_DISPATCHES = 20
+_pending_counts: dict[str, int] = {}  # workspace_id → consecutive dispatch count
+_BACKOFF_RESET_S = 60
+
 
 def set_pty_manager(mgr):
     global _pty_mgr
@@ -51,10 +56,14 @@ async def _on_task_created(event_name: str, payload: dict):
 async def _on_task_completed(event_name: str, payload: dict):
     """Task finished — check for next pending task to pick up."""
     new_status = payload.get("new_status", payload.get("status"))
+    ws_id = payload.get("workspace_id")
+    if ws_id and new_status in ("done", "verified"):
+        # Reset circuit breaker on successful completion
+        _pending_counts.pop(ws_id, None)
     if new_status in ("testing", "documenting"):
         return  # Pipeline is handling this task's lifecycle
     if new_status in ("done", "verified", "blocked", "review"):
-        await _maybe_dispatch(payload.get("workspace_id"))
+        await _maybe_dispatch(ws_id)
 
 
 async def _on_iteration_requested(event_name: str, payload: dict):
@@ -95,6 +104,18 @@ async def _deps_unmet(db, task: dict) -> bool:
 
 
 async def _do_dispatch(workspace_id: str, specific_task_id: str = None):
+    # Circuit breaker: prevent runaway dispatch loops
+    count = _pending_counts.get(workspace_id, 0)
+    if count >= MAX_PENDING_DISPATCHES:
+        logger.warning("Auto-exec circuit breaker: %d dispatches for workspace %s, pausing",
+                        count, workspace_id[:8])
+        await bus.emit(CommanderEvent.AUTO_EXEC_THROTTLED, {
+            "workspace_id": workspace_id,
+            "reason": "circuit_breaker",
+            "pending_count": count,
+        }, source="auto_exec")
+        return
+
     # Pipeline priority: if a pipeline is already handling this task, skip
     if specific_task_id:
         try:
@@ -211,6 +232,7 @@ async def _do_dispatch(workspace_id: str, specific_task_id: str = None):
     await asyncio.sleep(0.4)
     _pty_mgr.write(commander_id, b"\r")
 
+    _pending_counts[workspace_id] = _pending_counts.get(workspace_id, 0) + 1
     logger.info("Auto-exec dispatched task %s to commander %s", task["id"], commander_id)
 
     await bus.emit(CommanderEvent.AUTO_EXEC_TASK_DISPATCHED, {

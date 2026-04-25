@@ -128,15 +128,19 @@ async def analyze_patterns(
     Groups decisions by tool + normalized pattern.  For groups with
     sufficient samples and consistent user behavior, proposes a rule.
     """
-    # Query decisions that had user responses (ask decisions where user acted)
-    where = "WHERE user_response IS NOT NULL AND decision = 'ask'"
+    # Query 'ask' decisions — include both responded AND unresponded.
+    # PostToolUse only fires when a user approves, so denials leave
+    # user_response NULL.  Treat old unresponded 'ask' decisions as
+    # implicit denials (the user saw the prompt and chose not to proceed).
+    where = "WHERE decision = 'ask'"
     params = []
     if workspace_id:
         where += " AND workspace_id = ?"
         params.append(workspace_id)
 
     rows = await db.execute_fetchall(
-        f"""SELECT tool_name, tool_input_summary, user_response
+        f"""SELECT tool_name, tool_input_summary, user_response,
+                   created_at
             FROM safety_decisions {where}
             ORDER BY created_at DESC LIMIT 5000""",
         params,
@@ -148,6 +152,20 @@ async def analyze_patterns(
         tool = row["tool_name"]
         summary = row["tool_input_summary"] or ""
         response = row["user_response"]
+
+        # Infer denial: 'ask' decisions with no user_response that are
+        # older than 60s were almost certainly denied by the user.
+        if response is None:
+            try:
+                from datetime import datetime, timezone, timedelta
+                created = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
+                if created.tzinfo is None:
+                    created = created.replace(tzinfo=timezone.utc)
+                if datetime.now(timezone.utc) - created < timedelta(seconds=60):
+                    continue  # too recent — might still be pending approval
+            except Exception:
+                continue
+            response = "denied"
 
         # Normalize for grouping
         if tool.lower() in ("bash", "execute"):

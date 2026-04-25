@@ -82,11 +82,17 @@ def get_sandbox_home(account_id: str, cli_type: str = "claude") -> str | None:
     for dotfile in SYMLINK_DOTFILES:
         src = real_home / dotfile
         dst = account_home / dotfile
-        if src.exists() and not dst.exists():
-            try:
-                dst.symlink_to(src)
-            except OSError:
-                pass  # Already exists or permission issue
+        if not src.exists() or dst.exists():
+            continue
+        # Validate source is not a symlink chain escaping HOME
+        try:
+            resolved = src.resolve()
+            if not (resolved.is_relative_to(real_home) or resolved == src):
+                logger.warning("Skipping suspicious symlink %s -> %s", src, resolved)
+                continue
+            dst.symlink_to(src)
+        except OSError as e:
+            logger.debug("Symlink %s -> %s failed: %s", dst, src, e)
 
     return str(account_home)
 

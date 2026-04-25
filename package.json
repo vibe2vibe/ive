@@ -20,5 +20,8 @@
     "vibecoding"
   ],
   "author": "v77.ai",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.104.1"
+  }
 }

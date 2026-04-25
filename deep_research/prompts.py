@@ -150,7 +150,16 @@ Rules:
 - Every factual claim MUST have an inline citation [N]
 - Be thorough but not redundant
 - Highlight contradictions between sources
-- Distinguish between well-established facts and emerging/speculative ideas"""
+- Distinguish between well-established facts and emerging/speculative ideas
+- When presenting quantitative comparisons or timelines, include Mermaid diagrams:
+  ```mermaid
+  xychart-beta
+    title "Comparison Title"
+    x-axis [A, B, C]
+    y-axis "Metric" 0 --> 100
+    bar [80, 60, 40]
+  ```
+- Only add visualizations when they genuinely clarify the data"""
 
 # ── Phase 6: Claim Verification ───────────────────────────────────
 

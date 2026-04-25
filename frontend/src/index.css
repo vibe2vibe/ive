@@ -58,6 +58,10 @@
 }
 
 /* ─── Base ─── */
+html, body {
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;

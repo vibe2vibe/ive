@@ -54,7 +54,7 @@ export default function TaskDetailModal({ task, workspaceId, commanderSessionId,
   const [revisionNotes, setRevisionNotes] = useState('')
   const [showHistory, setShowHistory] = useState(false)
   const [loadingOverview, setLoadingOverview] = useState(false)
-  const [previewUrl, setPreviewUrl] = useState(task.preview_url || 'http://localhost:5173')
+  const [previewUrl, setPreviewUrl] = useState(task.preview_url || window.location.origin)
   const iframeRef = useCallback((node) => { if (node) node.__iframeRef = node }, [])
   const [attachments, setAttachments] = useState([])
   const [dependsOn, setDependsOn] = useState(() => {
@@ -400,6 +400,26 @@ export default function TaskDetailModal({ task, workspaceId, commanderSessionId,
           </button>
           <button data-tab="execute" onClick={() => setTab('execute')} className={tabClass('execute')}>Execute</button>
           <div className="flex-1" />
+          <button
+            onClick={async () => {
+              try {
+                // Ensure commander exists
+                const commander = await api.startCommander(workspaceId)
+                if (commander?.id) {
+                  // Switch to commander tab
+                  useStore.getState().setActiveSession(commander.id)
+                  // Send refine prompt
+                  const refinePrompt = `I want to refine ticket #${task.id.slice(0, 8)} "${task.title}". Here are the current details:\n\nDescription: ${task.description || '(none)'}\nAcceptance Criteria: ${task.acceptance_criteria || '(none)'}\nStatus: ${task.status}\nLabels: ${task.labels || '(none)'}\n\nHelp me improve this ticket. Listen to what I say and help me refine the description, acceptance criteria, and implementation approach. Use update_task to apply changes when we agree.`
+                  sendTerminalCommand(commander.id, refinePrompt)
+                  onClose()
+                }
+              } catch (e) { console.error('Refine with Commander failed:', e) }
+            }}
+            className="px-2 py-1 text-[10px] font-mono text-cyan-500 hover:text-cyan-300 hover:bg-cyan-500/10 rounded transition-colors flex items-center gap-1"
+            title="Refine this ticket with Commander"
+          >
+            <PenTool size={10} /> Refine
+          </button>
           <button onClick={() => onDelete(task.id)} className="p-1 text-zinc-600 hover:text-red-400 mr-1"><Trash2 size={12} /></button>
           <button onClick={onClose} className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors"><X size={16} /></button>
         </div>
@@ -812,7 +832,7 @@ export default function TaskDetailModal({ task, workspaceId, commanderSessionId,
                   value={previewUrl}
                   onChange={(e) => setPreviewUrl(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur() }}
-                  placeholder="http://localhost:3000"
+                  placeholder="http://localhost:3000 or any URL"
                   className="flex-1 px-2.5 py-1.5 text-xs bg-zinc-900 border border-zinc-700 rounded text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 font-mono"
                 />
                 <button

@@ -1,9 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
-import { Search, X, Plus, ChevronDown, ChevronRight, ExternalLink, Globe, Tag, Trash2, RefreshCw, Play, ZoomIn, Clock, History } from 'lucide-react'
+import { Search, X, Plus, ChevronDown, ChevronRight, ExternalLink, Globe, Tag, Trash2, RefreshCw, Play, ZoomIn, Clock, History, Lightbulb, Send, Timer, ToggleLeft, ToggleRight } from 'lucide-react'
 import { api } from '../../lib/api'
 import useStore from '../../state/store'
 import usePanelCreate from '../../hooks/usePanelCreate'
 import useListKeyboardNav from '../../hooks/useListKeyboardNav'
+import ResearchPlanPanel from './ResearchPlanPanel'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import MermaidBlock from './MermaidBlock'
 
 export default function ResearchPanel({ onClose }) {
   const [entries, setEntries] = useState([])
@@ -23,6 +27,12 @@ export default function ResearchPanel({ onClose }) {
   const [detailBtnIdx, setDetailBtnIdx] = useState(0)
   const [progressLog, setProgressLog] = useState({})  // { entry_id: [lines] }
   const [showProgress, setShowProgress] = useState(true)
+  const [showPlanPanel, setShowPlanPanel] = useState(false)
+  const [activeJobId, setActiveJobId] = useState(null)  // for steer mode
+  const [showSchedules, setShowSchedules] = useState(false)
+  const [schedules, setSchedules] = useState([])
+  const [newScheduleQuery, setNewScheduleQuery] = useState('')
+  const [newScheduleInterval, setNewScheduleInterval] = useState(24)
   const topicInputRef = useRef(null)
   const listRef = useRef(null)
   const progressEndRef = useRef(null)
@@ -33,18 +43,23 @@ export default function ResearchPanel({ onClose }) {
 
   useEffect(() => {
     loadEntries()
+    // Restore activeJobId if a research job is currently running
+    api.listResearchJobs().then(jobs => {
+      const running = (jobs || []).find(j => j.status === 'running')
+      if (running) setActiveJobId(running.job_id)
+    }).catch(() => {})
   }, [activeWorkspaceId, filter])
 
   // Live progress from research jobs
   useEffect(() => {
     const onProgress = (e) => {
-      const { entry_id, line, job_id } = e.detail || {}
+      const { entry_id, line, job_id, phase, round, total_rounds, confidence, elapsed, findings_count } = e.detail || {}
       if (!entry_id || !line) return
       const ts = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
       setProgressLog((prev) => {
         const lines = prev[entry_id] || []
         // Cap at 200 lines to avoid memory bloat
-        const next = [...lines, { ts, line, job_id }].slice(-200)
+        const next = [...lines, { ts, line, job_id, phase, round, total_rounds, confidence, elapsed, findings_count }].slice(-200)
         return { ...prev, [entry_id]: next }
       })
     }
@@ -63,9 +78,11 @@ export default function ResearchPanel({ onClose }) {
           [eid]: [...(prev[eid] || []), { ts, line: `Research ${status}`, done: true }],
         }))
       }
+      setActiveJobId(null)
     }
     const onStarted = (e) => {
       const eid = e?.detail?.entry_id
+      const jid = e?.detail?.job_id
       const backend = e?.detail?.backend || 'standalone'
       if (eid) {
         const ts = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -74,6 +91,7 @@ export default function ResearchPanel({ onClose }) {
           [eid]: [{ ts, line: `Research started (${backend})`, start: true }],
         }))
       }
+      if (jid) setActiveJobId(jid)
       loadEntries()
     }
     window.addEventListener('cc-research_progress', onProgress)
@@ -139,7 +157,7 @@ export default function ResearchPanel({ onClose }) {
       setSelected({ ...selected, status: 'in_progress' })
     }
     try {
-      await api.startResearch({
+      const res = await api.startResearch({
         query: entry.query || entry.topic,
         entry_id: entry.id,
         workspace_id: entry.workspace_id || activeWorkspaceId,
@@ -148,6 +166,7 @@ export default function ResearchPanel({ onClose }) {
         recency_months: opts.recency_months || undefined,
         dig_deeper: opts.dig_deeper || false,
       })
+      if (res?.job_id) setActiveJobId(res.job_id)
     } catch (err) {
       setEntries((prev) => prev.map((x) => x.id === entry.id ? { ...x, status: 'pending' } : x))
       if (selected?.id === entry.id) {
@@ -230,6 +249,38 @@ export default function ResearchPanel({ onClose }) {
     ].filter(Boolean).join('\n')
     navigator.clipboard.writeText(context)
     alert('Research copied to clipboard — paste into any session')
+  }
+
+  // ── Research schedules ───────────────────────────────────────────
+
+  const loadSchedules = async () => {
+    try {
+      const data = await api.getResearchSchedules(activeWorkspaceId)
+      setSchedules(Array.isArray(data) ? data : [])
+    } catch { setSchedules([]) }
+  }
+
+  useEffect(() => { if (showSchedules) loadSchedules() }, [showSchedules, activeWorkspaceId])
+
+  const handleCreateSchedule = async () => {
+    if (!newScheduleQuery.trim()) return
+    await api.createResearchSchedule({
+      workspace_id: activeWorkspaceId,
+      query: newScheduleQuery.trim(),
+      interval_hours: newScheduleInterval,
+    })
+    setNewScheduleQuery('')
+    loadSchedules()
+  }
+
+  const handleToggleSchedule = async (sched) => {
+    await api.updateResearchSchedule(sched.id, { enabled: !sched.enabled })
+    loadSchedules()
+  }
+
+  const handleDeleteSchedule = async (id) => {
+    await api.deleteResearchSchedule(id)
+    loadSchedules()
   }
 
   // ── Available action buttons in the detail pane (status-dependent) ──
@@ -321,6 +372,17 @@ export default function ResearchPanel({ onClose }) {
           <span className="text-xs text-text-primary font-medium">Research DB</span>
           <span className="text-[10px] text-text-faint">{wsName} · {entries.length} entries</span>
           <div className="flex-1" />
+          {activeJobId && (
+            <button onClick={() => setShowPlanPanel(true)} className="flex items-center gap-1 px-2 py-1 text-xs text-amber-400/80 hover:text-amber-400 hover:bg-amber-500/10 rounded-md transition-colors" title="Inject sub-queries into running research">
+              <Send size={11} /> steer
+            </button>
+          )}
+          <button onClick={() => setShowPlanPanel(true)} className="flex items-center gap-1 px-2 py-1 text-xs text-text-faint hover:text-text-secondary hover:bg-bg-hover rounded-md transition-colors" title="Plan research before launching">
+            <Lightbulb size={11} /> plan
+          </button>
+          <button onClick={() => setShowSchedules(!showSchedules)} className={`flex items-center gap-1 px-2 py-1 text-xs rounded-md transition-colors ${showSchedules ? 'text-amber-400 bg-amber-500/10' : 'text-text-faint hover:text-text-secondary hover:bg-bg-hover'}`} title="Recurring research schedules">
+            <Timer size={11} /> schedules{schedules.length > 0 ? ` (${schedules.length})` : ''}
+          </button>
           <button onClick={() => setShowCreate(!showCreate)} className="flex items-center gap-1 px-2 py-1 text-xs text-text-faint hover:text-text-secondary hover:bg-bg-hover rounded-md transition-colors">
             <Plus size={11} /> new
           </button>
@@ -358,6 +420,52 @@ export default function ResearchPanel({ onClose }) {
               </label>
             </div>
           </form>
+        )}
+
+        {/* Schedules panel */}
+        {showSchedules && (
+          <div className="border-b border-border-secondary bg-bg-elevated px-4 py-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <input
+                value={newScheduleQuery}
+                onChange={e => setNewScheduleQuery(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleCreateSchedule() }}
+                placeholder="Research query to run on schedule..."
+                className="flex-1 px-2 py-1.5 text-xs bg-bg-inset border border-border-primary rounded-md text-text-primary placeholder-text-faint focus:outline-none ide-focus-ring font-mono"
+              />
+              <select value={newScheduleInterval} onChange={e => setNewScheduleInterval(Number(e.target.value))} className="px-2 py-1.5 text-xs bg-bg-inset border border-border-primary rounded text-text-secondary">
+                <option value={6}>6h</option>
+                <option value={12}>12h</option>
+                <option value={24}>daily</option>
+                <option value={72}>3 days</option>
+                <option value={168}>weekly</option>
+              </select>
+              <button onClick={handleCreateSchedule} disabled={!newScheduleQuery.trim()} className="px-2.5 py-1.5 text-xs font-medium bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 rounded-md transition-colors disabled:opacity-40">
+                <Plus size={11} />
+              </button>
+            </div>
+            {schedules.length === 0 && (
+              <div className="text-[10px] text-text-faint text-center py-1">No schedules. Add one above.</div>
+            )}
+            {schedules.map(sched => (
+              <div key={sched.id} className="flex items-center gap-2 px-2 py-1.5 bg-bg-primary rounded border border-border-secondary">
+                <button onClick={() => handleToggleSchedule(sched)} className="shrink-0" title={sched.enabled ? 'Disable' : 'Enable'}>
+                  {sched.enabled ? <ToggleRight size={14} className="text-green-400" /> : <ToggleLeft size={14} className="text-text-faint" />}
+                </button>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11px] text-text-primary truncate font-mono">{sched.query}</div>
+                  <div className="text-[10px] text-text-faint">
+                    every {sched.interval_hours}h
+                    {sched.last_run_at ? ` · last: ${sched.last_run_at.slice(0, 16)}` : ' · never run'}
+                    {sched.next_run_at ? ` · next: ${sched.next_run_at.slice(0, 16)}` : ''}
+                  </div>
+                </div>
+                <button onClick={() => handleDeleteSchedule(sched.id)} className="p-0.5 text-text-faint hover:text-red-400 transition-colors">
+                  <Trash2 size={10} />
+                </button>
+              </div>
+            ))}
+          </div>
         )}
 
         {/* Search + filter bar */}
@@ -492,14 +600,60 @@ export default function ResearchPanel({ onClose }) {
                           <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse ml-1" />
                         )}
                       </button>
+                      {/* Structured phase bar */}
+                      {(() => {
+                        const lastStructured = [...(lines || [])].reverse().find(l => l.phase)
+                        if (!lastStructured) return null
+                        const phaseColors = {
+                          init: 'bg-blue-500', decompose: 'bg-purple-500', search: 'bg-cyan-500',
+                          extract: 'bg-amber-500', evaluate: 'bg-orange-500', synthesize: 'bg-green-500',
+                          verify: 'bg-emerald-500', steer: 'bg-pink-500',
+                        }
+                        const phaseLabels = {
+                          init: 'Init', decompose: 'Decompose', search: 'Search',
+                          extract: 'Extract', evaluate: 'Evaluate', synthesize: 'Synthesize',
+                          verify: 'Verify', steer: 'Steered',
+                        }
+                        return (
+                          <div className="flex items-center gap-2 mb-1">
+                            <div className={`w-1.5 h-1.5 rounded-full ${phaseColors[lastStructured.phase] || 'bg-gray-500'} ${selected.status === 'in_progress' ? 'animate-pulse' : ''}`} />
+                            <span className="text-[10px] font-medium text-text-secondary">
+                              {phaseLabels[lastStructured.phase] || lastStructured.phase}
+                            </span>
+                            {lastStructured.round && (
+                              <span className="text-[10px] text-text-faint">
+                                Round {lastStructured.round}{lastStructured.total_rounds ? `/${lastStructured.total_rounds}` : ''}
+                              </span>
+                            )}
+                            {lastStructured.findings_count != null && (
+                              <span className="text-[10px] text-text-faint">{lastStructured.findings_count} findings</span>
+                            )}
+                            {lastStructured.elapsed != null && (
+                              <span className="text-[10px] text-text-faint">{lastStructured.elapsed}s</span>
+                            )}
+                            {lastStructured.confidence != null && (
+                              <span className={`text-[10px] font-mono ${lastStructured.confidence >= 0.8 ? 'text-green-400' : lastStructured.confidence >= 0.5 ? 'text-amber-400' : 'text-text-faint'}`}>
+                                {Math.round(lastStructured.confidence * 100)}%
+                              </span>
+                            )}
+                          </div>
+                        )
+                      })()}
                       {showProgress && (
                         <div className="bg-bg-primary border border-border-secondary rounded-md p-2 max-h-36 overflow-y-auto font-mono text-[10px] leading-relaxed">
-                          {lines?.length ? lines.map((l, i) => (
-                            <div key={i} className={`flex gap-2 ${l.done ? 'text-green-400' : l.start ? 'text-cyan-400' : 'text-text-muted'}`}>
-                              <span className="text-text-faint shrink-0">{l.ts}</span>
-                              <span className={l.line.startsWith('Tool:') ? 'text-amber-400/80' : ''}>{l.line}</span>
-                            </div>
-                          )) : (
+                          {lines?.length ? lines.map((l, i) => {
+                            const phaseIcon = l.phase ? {
+                              init: '◈', decompose: '◇', search: '⊕', extract: '↓',
+                              evaluate: '✦', synthesize: '◆', verify: '✓', steer: '→',
+                            }[l.phase] || '·' : ''
+                            return (
+                              <div key={i} className={`flex gap-2 ${l.done ? 'text-green-400' : l.start ? 'text-cyan-400' : 'text-text-muted'}`}>
+                                <span className="text-text-faint shrink-0">{l.ts}</span>
+                                {phaseIcon && <span className="text-text-faint shrink-0 w-3 text-center">{phaseIcon}</span>}
+                                <span className={l.line.startsWith('Tool:') ? 'text-amber-400/80' : l.phase === 'steer' ? 'text-pink-400' : ''}>{l.line}</span>
+                              </div>
+                            )
+                          }) : (
                             <div className="text-text-faint">Waiting for progress events...</div>
                           )}
                           <div ref={progressEndRef} />
@@ -509,12 +663,36 @@ export default function ResearchPanel({ onClose }) {
                   )
                 })()}
 
-                {/* Findings summary */}
+                {/* Findings summary — rendered as Markdown with Mermaid diagrams */}
                 {selected.findings_summary && (
                   <div>
                     <h4 className="text-[10px] text-text-faint font-medium uppercase tracking-wider mb-1">Findings</h4>
-                    <div className="text-xs text-text-secondary font-mono bg-bg-inset rounded-md p-3 whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">
-                      {selected.findings_summary}
+                    <div className="text-xs text-text-secondary bg-bg-inset rounded-md p-3 leading-relaxed max-h-[50vh] overflow-y-auto prose prose-invert prose-xs max-w-none [&_h1]:text-sm [&_h2]:text-xs [&_h3]:text-xs [&_h1]:text-text-primary [&_h2]:text-text-primary [&_h3]:text-text-secondary [&_p]:text-text-secondary [&_li]:text-text-secondary [&_a]:text-cyan-400 [&_code]:text-amber-400 [&_code]:bg-bg-primary [&_code]:px-1 [&_code]:rounded [&_pre]:bg-bg-primary [&_pre]:border [&_pre]:border-border-secondary [&_pre]:rounded-md [&_table]:text-[11px] [&_th]:px-2 [&_th]:py-1 [&_td]:px-2 [&_td]:py-1 [&_th]:bg-bg-tertiary [&_th]:text-text-primary [&_tr]:border-b [&_tr]:border-border-secondary [&_blockquote]:border-l-2 [&_blockquote]:border-cyan-500/30 [&_blockquote]:pl-3 [&_blockquote]:text-text-muted">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          code({ className, children, ...props }) {
+                            const match = /language-(\w+)/.exec(className || '')
+                            const lang = match?.[1]
+                            if (lang === 'mermaid') {
+                              return <MermaidBlock code={String(children).trim()} />
+                            }
+                            // Inline or regular code block
+                            if (!className) return <code {...props}>{children}</code>
+                            return <pre className={className}><code>{children}</code></pre>
+                          },
+                          pre({ children }) {
+                            // If the child is already a MermaidBlock, don't double-wrap
+                            const child = Array.isArray(children) ? children[0] : children
+                            if (child?.type === MermaidBlock) return child
+                            // Also check props.node for mermaid class on the inner code element
+                            if (child?.props?.className?.includes('language-mermaid')) return child
+                            return <pre>{children}</pre>
+                          },
+                        }}
+                      >
+                        {selected.findings_summary}
+                      </ReactMarkdown>
                     </div>
                   </div>
                 )}
@@ -612,6 +790,39 @@ export default function ResearchPanel({ onClose }) {
             )}
           </div>
         </div>
+
+        {/* Research Plan Panel (overlay) */}
+        {showPlanPanel && (
+          <ResearchPlanPanel
+            onClose={() => setShowPlanPanel(false)}
+            activeJobId={activeJobId}
+            activeWorkspaceId={activeWorkspaceId}
+            onLaunch={async ({ query: q, plan, workspace_id }) => {
+              setShowPlanPanel(false)
+              // Create entry + start research with plan
+              try {
+                const created = await api.createResearch({
+                  workspace_id: workspace_id || activeWorkspaceId,
+                  topic: q,
+                })
+                if (created?.id) {
+                  const res = await api.startResearch({
+                    query: q,
+                    entry_id: created.id,
+                    workspace_id: workspace_id || activeWorkspaceId,
+                    plan,
+                    depth: depth,
+                    cross_temporal: crossTemporal,
+                  })
+                  if (res?.job_id) setActiveJobId(res.job_id)
+                }
+                loadEntries()
+              } catch (err) {
+                alert(`Failed to launch planned research: ${err?.message || 'unknown'}`)
+              }
+            }}
+          />
+        )}
       </div>
     </div>
   )

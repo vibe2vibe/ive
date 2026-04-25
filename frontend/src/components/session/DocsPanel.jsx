@@ -126,7 +126,7 @@ export default function DocsPanel({ onClose }) {
 
   const handlePreview = () => {
     const port = status?.dev_port || 5174
-    window.open(`http://localhost:${port}`, '_blank')
+    window.open(`${window.location.protocol}//${window.location.hostname}:${port}`, '_blank')
   }
 
   return (

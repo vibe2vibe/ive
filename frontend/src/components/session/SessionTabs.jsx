@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { X, Pencil, Copy, Download, Trash2, Globe, FolderOpen, LayoutGrid, Columns2, Rows2, Grid2x2, Home, ChevronLeft, ChevronRight } from 'lucide-react'
+import { X, Pencil, Copy, Download, Trash2, Globe, FolderOpen, LayoutGrid, Columns2, Rows2, Grid2x2, Home, ChevronLeft, ChevronRight, Sparkles, Brain } from 'lucide-react'
 import useStore from '../../state/store'
 import { api } from '../../lib/api'
 import { getWorkspaceColor } from '../../lib/constants'
@@ -39,9 +39,34 @@ function ContextMenu({ x, y, session, onClose }) {
     onClose()
   }
 
+  const handleLearn = async () => {
+    onClose()
+    try {
+      const cli = session.cli_type || 'claude'
+      const res = await api.distillSession(session.id, { type: 'guideline', cli })
+      if (res.error) {
+        useStore.getState().addNotification({
+          type: 'warning',
+          message: `Could not learn from "${session.name}": ${res.error}`,
+        })
+      } else {
+        useStore.getState().addNotification({
+          type: 'info',
+          message: `Learning from "${session.name}" in background...`,
+        })
+      }
+    } catch (e) {
+      useStore.getState().addNotification({
+        type: 'warning',
+        message: `Could not learn from "${session.name}": ${e.message || 'unknown error'}`,
+      })
+    }
+  }
+
   const items = [
     { icon: Pencil, label: 'Rename', action: handleRename },
     { icon: Copy, label: 'Clone', action: handleClone },
+    { icon: Sparkles, label: 'Learn from this', action: handleLearn },
     { icon: Download, label: 'Export', action: handleExport },
     { icon: Trash2, label: 'Delete', action: handleDelete, danger: true },
   ]
@@ -117,6 +142,8 @@ export default function SessionTabs() {
   const showHome = useStore((s) => s.showHome)
   const tabScope = useStore((s) => s.tabScope)
   const setTabScope = useStore((s) => s.setTabScope)
+  const peers = useStore((s) => s.peers)
+  const myClientId = useStore((s) => s.myClientId)
   const setActiveSession = useStore((s) => s.setActiveSession)
   const closeTab = useStore((s) => s.closeTab)
   const planWaiting = useStore((s) => s.planWaiting)
@@ -412,26 +439,44 @@ export default function SessionTabs() {
 
               <span
                 className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                  compactionState[id]?.status === 'compacting'
-                    ? 'bg-yellow-400 animate-pulse'
-                    : compactionState[id]?.status === 'compacted'
-                      ? 'bg-yellow-400'
-                      : compactionState[id]?.status === 'warning'
-                        ? 'bg-orange-400'
-                        : planWaiting[id]
-                          ? 'bg-amber-400 animate-subtle-pulse'
-                          : isSessionActive(id)
-                            ? 'bg-red-400 animate-subtle-pulse'
-                            : session.status === 'running'
-                              ? 'bg-green-400'
-                              : session.status === 'exited'
-                                ? 'bg-red-400'
-                                : 'bg-zinc-600'
+                  planWaiting[id] || isSessionActive(id)
+                    ? 'bg-amber-400 animate-subtle-pulse'
+                    : compactionState[id]?.status === 'compacting' || compactionState[id]?.status === 'warning'
+                      ? 'bg-orange-400 animate-pulse'
+                      : session.status === 'running'
+                        ? 'bg-green-400'
+                        : session.status === 'exited'
+                          ? 'bg-zinc-500'
+                          : 'bg-zinc-600'
                 }`}
+                title={
+                  planWaiting[id] ? 'Waiting for input'
+                  : isSessionActive(id) ? 'Needs attention'
+                  : compactionState[id]?.status === 'compacting' ? 'Compacting context'
+                  : compactionState[id]?.status === 'warning' ? `${compactionState[id].percent_left}% context left`
+                  : session.status === 'running' ? 'Running'
+                  : session.status === 'exited' ? 'Exited'
+                  : 'Idle'
+                }
               />
               {session.session_type === 'commander' && (
                 <span className="text-[9px] text-amber-400 font-semibold">CMD</span>
               )}
+              {(() => {
+                try {
+                  const mi = typeof session.memory_injected_info === 'string'
+                    ? JSON.parse(session.memory_injected_info) : session.memory_injected_info
+                  if (mi?.count > 0) return (
+                    <span
+                      className="text-violet-400/70"
+                      title={`${mi.count} memory ${mi.count === 1 ? 'entry' : 'entries'} injected (${mi.chars} chars)`}
+                    >
+                      <Brain size={10} />
+                    </span>
+                  )
+                } catch { /* ignore */ }
+                return null
+              })()}
               {(() => {
                 const tags = Array.isArray(session.tags) ? session.tags
                   : typeof session.tags === 'string' ? (() => { try { return JSON.parse(session.tags) } catch { return [] } })()
@@ -474,6 +519,27 @@ export default function SessionTabs() {
               )}
               <span className="text-text-faint font-mono text-[10px]">{session.model}</span>
               {session.is_external ? <span className="text-teal-400/70 font-mono text-[9px]">ext</span> : null}
+              {/* Multiplayer: peer presence dots */}
+              {(() => {
+                const viewing = Object.entries(peers).filter(([cid, p]) => p.viewing_session === id && cid !== myClientId)
+                return viewing.length > 0 ? (
+                  <div className="flex items-center -space-x-1">
+                    {viewing.slice(0, 3).map(([cid, p]) => (
+                      <span
+                        key={cid}
+                        className="w-3.5 h-3.5 rounded-full text-[7px] font-bold text-white flex items-center justify-center ring-1 ring-bg-primary"
+                        style={{ background: p.color }}
+                        title={p.name}
+                      >
+                        {p.name?.[0]?.toUpperCase() || '?'}
+                      </span>
+                    ))}
+                    {viewing.length > 3 && (
+                      <span className="text-[8px] text-text-faint ml-0.5">+{viewing.length - 3}</span>
+                    )}
+                  </div>
+                ) : null
+              })()}
               <button
                 onClick={(e) => {
                   e.stopPropagation()

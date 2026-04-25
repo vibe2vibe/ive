@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { ListOrdered, Plus, Trash2, Play, X, RotateCcw, GripVertical } from 'lucide-react'
+import { ListOrdered, Plus, Trash2, Play, X, RotateCcw, GripVertical, Pencil } from 'lucide-react'
 import { api } from '../../lib/api'
 import useStore from '../../state/store'
 import useListKeyboardNav from '../../hooks/useListKeyboardNav'
@@ -85,7 +85,8 @@ export default function CascadePalette({ onClose }) {
     setMode('edit')
     setEditId(cascade.id)
     setName(cascade.name)
-    setSteps([...cascade.steps, ''])
+    const s = Array.isArray(cascade.steps) ? cascade.steps.map(String) : []
+    setSteps([...s, ''])
     setLoop(!!cascade.loop)
     setLoopReprompt(!!cascade.loop_reprompt)
     setVariables(cascade.variables || [])
@@ -109,7 +110,7 @@ export default function CascadePalette({ onClose }) {
     ? cascades.filter(
         (c) =>
           c.name.toLowerCase().includes(query.toLowerCase()) ||
-          c.steps.some((s) => s.toLowerCase().includes(query.toLowerCase()))
+          (Array.isArray(c.steps) && c.steps.some((s) => String(s).toLowerCase().includes(query.toLowerCase())))
       )
     : cascades
 
@@ -158,17 +159,28 @@ export default function CascadePalette({ onClose }) {
             </span>
           )}
           <div className="flex-1" />
+          {mode !== 'list' && (
+            <button
+              onClick={resetForm}
+              className="flex items-center gap-1 px-2 py-1 text-xs text-text-faint hover:text-text-secondary hover:bg-bg-hover rounded-md transition-colors"
+            >
+              back
+            </button>
+          )}
           <button
-            onClick={() => (mode === 'list' ? setMode('create') : resetForm())}
+            onClick={() => {
+              if (mode !== 'list') resetForm()
+              setMode('create')
+              setEditId(null)
+              setName('')
+              setSteps(['', ''])
+              setLoop(false)
+              setLoopReprompt(false)
+              setVariables([])
+            }}
             className="flex items-center gap-1 px-2 py-1 text-xs text-text-faint hover:text-text-secondary hover:bg-bg-hover rounded-md transition-colors"
           >
-            {mode === 'list' ? (
-              <>
-                <Plus size={11} /> new
-              </>
-            ) : (
-              'back'
-            )}
+            <Plus size={11} /> new
           </button>
           <button
             onClick={onClose}
@@ -202,7 +214,9 @@ export default function CascadePalette({ onClose }) {
 
             {/* Cascade list */}
             <div ref={listRef} className="max-h-[55vh] overflow-y-auto">
-              {filtered.map((cascade, idx) => (
+              {filtered.map((cascade, idx) => {
+                const cSteps = Array.isArray(cascade.steps) ? cascade.steps : []
+                return (
                 <div
                   key={cascade.id}
                   data-idx={idx}
@@ -220,24 +234,24 @@ export default function CascadePalette({ onClose }) {
                         {cascade.name}
                       </span>
                       <span className="text-[10px] text-text-faint font-mono">
-                        {cascade.steps.length} steps
+                        {cSteps.length} steps
                       </span>
                       {cascade.loop ? (
                         <RotateCcw size={9} className="text-indigo-400/50" title="Loops" />
                       ) : null}
                     </div>
                     <div className="flex flex-col gap-0.5 mt-1">
-                      {cascade.steps.slice(0, 3).map((step, i) => (
+                      {cSteps.slice(0, 3).map((step, i) => (
                         <span
                           key={i}
                           className="text-[10px] text-text-muted font-mono truncate"
                         >
-                          {i + 1}. {step.length > 80 ? step.slice(0, 80) + '...' : step}
+                          {i + 1}. {String(step).length > 80 ? String(step).slice(0, 80) + '...' : String(step)}
                         </span>
                       ))}
-                      {cascade.steps.length > 3 && (
+                      {cSteps.length > 3 && (
                         <span className="text-[10px] text-text-faint font-mono">
-                          +{cascade.steps.length - 3} more
+                          +{cSteps.length - 3} more
                         </span>
                       )}
                     </div>
@@ -261,8 +275,9 @@ export default function CascadePalette({ onClose }) {
                     <button
                       onClick={() => handleEdit(cascade)}
                       className="p-1 text-text-faint hover:text-text-secondary transition-colors"
+                      title="Edit"
                     >
-                      <Plus size={10} />
+                      <Pencil size={10} />
                     </button>
                     <button
                       onClick={() => handleDelete(cascade.id)}
@@ -272,7 +287,7 @@ export default function CascadePalette({ onClose }) {
                     </button>
                   </div>
                 </div>
-              ))}
+              )})}
               {filtered.length === 0 && (
                 <div className="px-4 py-10 text-xs text-text-faint text-center space-y-1">
                   <ListOrdered size={20} className="mx-auto text-text-faint/30" />
@@ -338,6 +353,11 @@ export default function CascadePalette({ onClose }) {
               variables={variables}
               onVariablesChange={setVariables}
             />
+            {variables.length === 0 && (
+              <div className="text-[10px] text-text-faint font-mono px-1">
+                tip: use <span className="text-indigo-400/70">{'{variable_name}'}</span> in steps to create variables prompted at run time
+              </div>
+            )}
 
             <label className="flex items-center gap-2 cursor-pointer">
               <span

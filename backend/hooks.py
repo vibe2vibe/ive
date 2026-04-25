@@ -11,9 +11,12 @@ The script only activates when COMMANDER_SESSION_ID is set in the env,
 so standalone CLI usage is unaffected.
 """
 
+import hashlib
 import json
 import logging
+import re
 import time
+from collections import deque
 from aiohttp import web
 
 logger = logging.getLogger(__name__)
@@ -75,6 +78,10 @@ _hook_sessions: dict[str, dict] = {}
 #   "last_idle_at": float (monotonic),
 #   "tool_stack": [str],  # nested tool calls
 #   "subagents": {agent_id -> {id, type, status, started_at, tools: [], result}},
+#   "tool_history": deque[(tool_name, input_hash)],  # doom loop detection
+#   "last_doom_warning_at": float (monotonic),  # throttle doom warnings
+#   "idle_count": int,  # number of idle transitions (for auto-title)
+#   "titled": bool,  # whether auto-title has fired
 # }
 
 _IDLE_THROTTLE_INTERVAL = 15.0  # seconds — same as old IDLE_BROADCAST_MIN_INTERVAL
@@ -170,10 +177,22 @@ def _get_state(session_id: str) -> dict:
             "last_idle_at": 0.0,
             "tool_stack": [],
             "subagents": {},
+            "tool_history": deque(maxlen=30),
+            "last_doom_warning_at": 0.0,
+            "idle_count": 0,
+            "titled": False,
         }
     s = _hook_sessions[session_id]
     if "subagents" not in s:
         s["subagents"] = {}
+    if "tool_history" not in s:
+        s["tool_history"] = deque(maxlen=30)
+    if "last_doom_warning_at" not in s:
+        s["last_doom_warning_at"] = 0.0
+    if "idle_count" not in s:
+        s["idle_count"] = 0
+    if "titled" not in s:
+        s["titled"] = False
     return s
 
 
@@ -256,6 +275,758 @@ def _summarize_tool_input(tool_name: str, tool_input: dict) -> str:
     return ""
 
 
+# ─── Compliance: external access logging ──────────────────────────────
+_URL_RE = re.compile(r'https?://[^\s\'"<>]+')
+_DOMAIN_RE = re.compile(r'https?://([^/:]+)')
+
+# Tools that access external sources
+_NETWORK_TOOLS = {
+    "webfetch", "web_fetch", "websearch", "web_search",
+    "bash", "execute", "execute_command",
+}
+# Bash subcommands that imply network access
+_NET_CMDS = re.compile(r'\b(curl|wget|http|fetch|nc|ssh|scp|rsync|git\s+(clone|fetch|pull|push))\b', re.I)
+
+
+async def _log_external_access(session_id: str, tool_name: str, tool_input: dict):
+    """Extract URLs from tool input and log to external_access_log."""
+    tn = tool_name.lower()
+    if tn not in _NETWORK_TOOLS:
+        return
+
+    urls: list[str] = []
+    source_type = "unknown"
+
+    if tn in ("webfetch", "web_fetch"):
+        url = tool_input.get("url", "")
+        if url:
+            urls.append(url)
+        source_type = "webfetch"
+    elif tn in ("websearch", "web_search"):
+        query = tool_input.get("query", "")
+        if query:
+            urls.append(f"search://{query}")
+        source_type = "websearch"
+    elif tn in ("bash", "execute", "execute_command"):
+        cmd = tool_input.get("command", "") or tool_input.get("script", "")
+        if not cmd or not _NET_CMDS.search(cmd):
+            return
+        found = _URL_RE.findall(cmd)
+        urls.extend(found)
+        source_type = "bash"
+
+    if not urls:
+        return
+
+    # Resolve workspace
+    ws_id = None
+    try:
+        from server import _session_workspace
+        ws_id = _session_workspace.get(session_id)
+    except Exception:
+        pass
+
+    try:
+        from db import get_db
+        db = await get_db()
+        try:
+            for url in urls:
+                domain_m = _DOMAIN_RE.match(url)
+                domain = domain_m.group(1) if domain_m else None
+                await db.execute(
+                    """INSERT INTO external_access_log
+                       (session_id, workspace_id, tool_name, url, domain, source_type)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (session_id, ws_id, tool_name, url[:2000], domain, source_type),
+                )
+            await db.commit()
+        finally:
+            await db.close()
+    except Exception as exc:
+        logger.debug("External access logging failed: %s", exc)
+
+
+async def _log_command(session_id: str, tool_name: str, tool_input: dict):
+    """Log every Bash/execute command to command_log."""
+    tn = tool_name.lower()
+    if tn not in ("bash", "execute", "execute_command"):
+        return
+    command = tool_input.get("command", "") or tool_input.get("script", "")
+    if not command:
+        return
+
+    ws_id = None
+    try:
+        from server import _session_workspace
+        ws_id = _session_workspace.get(session_id)
+    except Exception:
+        pass
+
+    try:
+        from db import get_db
+        db = await get_db()
+        try:
+            await db.execute(
+                "INSERT INTO command_log (session_id, workspace_id, command) VALUES (?, ?, ?)",
+                (session_id, ws_id, command[:5000]),
+            )
+            await db.commit()
+        finally:
+            await db.close()
+    except Exception as exc:
+        logger.debug("Command logging failed: %s", exc)
+
+
+# ─── Compliance: AVCP package scanning ───────────────────────────────
+
+_PKG_INSTALL_RE = re.compile(
+    r'(?:^|\s)(?:sudo\s+)?'
+    r'(?:'
+    r'(?:pip3?|python3?\s+-m\s+pip)\s+install'
+    r'|(?:npm|yarn|pnpm|bun)\s+(?:install|add|i)\b'
+    r'|cargo\s+(?:add|install)\b'
+    r'|go\s+(?:get|install)\b'
+    r'|gem\s+install\b'
+    r'|composer\s+require\b'
+    r'|brew\s+install\b'
+    r')', re.I,
+)
+
+_ECO_RE = [
+    (re.compile(r'(?:^|\s)(?:pip3?|python)', re.I), "pypi"),
+    (re.compile(r'(?:^|\s)(?:npm|yarn|pnpm|bun)\s', re.I), "npm"),
+    (re.compile(r'(?:^|\s)cargo\s', re.I), "cargo"),
+    (re.compile(r'(?:^|\s)go\s', re.I), "go"),
+    (re.compile(r'(?:^|\s)(?:gem|bundle)\s', re.I), "rubygems"),
+    (re.compile(r'(?:^|\s)composer\s', re.I), "packagist"),
+    (re.compile(r'(?:^|\s)brew\s', re.I), "homebrew"),
+]
+
+
+def _detect_ecosystem(cmd: str) -> str:
+    for pat, eco in _ECO_RE:
+        if pat.search(cmd):
+            return eco
+    return "unknown"
+
+
+def _extract_packages(cmd: str, ecosystem: str) -> list[str]:
+    """Extract package names from a package manager command."""
+    # Normalize
+    cmd = re.sub(r'^\s*sudo\s+', '', cmd)
+    cmd = re.sub(r'^[A-Z_]+=[^ ]+\s+', '', cmd)
+    parts = cmd.split()
+    packages: list[str] = []
+
+    if ecosystem == "pypi":
+        skip = False
+        for part in parts:
+            if skip:
+                skip = False
+                continue
+            if part in ("-r", "--requirement"):
+                skip = True
+                continue
+            if part.startswith("-"):
+                if part not in ("--upgrade", "-U", "--force-reinstall", "--no-deps", "-q", "--quiet"):
+                    skip = True
+                continue
+            if part in ("pip", "pip3", "install", "python", "python3", "-m"):
+                continue
+            pkg = re.split(r'[>=<\[!~]', part)[0]
+            if pkg and not pkg.startswith((".", "/")):
+                packages.append(pkg)
+    elif ecosystem == "npm":
+        skip = False
+        for part in parts[2:]:
+            if skip:
+                skip = False
+                continue
+            if part.startswith("-"):
+                if part not in ("-D", "--save-dev", "-g", "--global", "-E", "--save-exact"):
+                    skip = True
+                continue
+            # Handle @scope/pkg@version
+            if part.startswith("@"):
+                packages.append(part.rsplit("@", 1)[0] if part.count("@") > 1 else part)
+            else:
+                packages.append(re.split(r'@', part)[0])
+    else:
+        # cargo, go, gem, composer, brew — extract non-flag args after subcommand
+        skip = False
+        for part in parts[2:]:
+            if skip:
+                skip = False
+                continue
+            if part.startswith("-"):
+                skip = True
+                continue
+            packages.append(part)
+
+    return [p for p in packages if p and p != "__manifest__"]
+
+
+_DANGEROUS_PATTERNS = [
+    "curl", "wget", "node -e", "sh -c", "bash -c", "eval", "exec",
+    "child_process", "base64", "/dev/tcp", "nc ", "python -c", "ruby -e",
+    "os.system", "subprocess", "powershell",
+]
+
+
+def _detect_install_scripts(ecosystem, pkg, scan_result, scanner, subprocess) -> str:
+    """Detect install-time scripts/hooks across all ecosystems.
+
+    Returns a warning string (empty = no scripts detected).
+    Each ecosystem has its own mechanism for running code at install time.
+    """
+    import json as _json
+    warnings = []
+
+    try:
+        if ecosystem == "npm":
+            # npm: preinstall/install/postinstall scripts in package.json
+            proc = subprocess.run(
+                ["npm", "view", pkg, "scripts", "--json"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                scripts = _json.loads(proc.stdout)
+                for hook in ("preinstall", "install", "postinstall"):
+                    if hook in scripts:
+                        cmd_str = scripts[hook]
+                        alerts = [p for p in _DANGEROUS_PATTERNS
+                                  if p.lower() in cmd_str.lower()]
+                        warnings.append(
+                            f"{hook}: {cmd_str[:120]}"
+                            + (f" [{', '.join(alerts)}]" if alerts else "")
+                        )
+
+        elif ecosystem == "pypi":
+            # pip: sdist-only = runs setup.py (arbitrary code); wheels are safe
+            # The scanner already fetched PyPI JSON — check release files
+            data = scanner.fetch_json(f"https://pypi.org/pypi/{pkg}/json")
+            if data:
+                version = scan_result.get("version", "")
+                files = data.get("releases", {}).get(version, [])
+                has_wheel = any(f.get("packagetype") == "bdist_wheel" for f in files)
+                has_sdist = any(f.get("packagetype") == "sdist" for f in files)
+                if has_sdist and not has_wheel:
+                    warnings.append("sdist-only: setup.py runs arbitrary code during install (no wheel available)")
+                elif has_sdist:
+                    # Has both — wheel is used by default, but sdist exists
+                    # Check if setup.py is present in sdist by looking at info
+                    info = data.get("info", {})
+                    if info.get("requires_dist") is None and not info.get("project_urls"):
+                        warnings.append("sdist available with potential setup.py execution")
+
+        elif ecosystem == "cargo":
+            # cargo: build.rs build scripts run during cargo build/install
+            data = scanner.fetch_json(f"https://crates.io/api/v1/crates/{pkg}")
+            if data:
+                versions = data.get("versions", [])
+                version = scan_result.get("version", "")
+                for v in versions:
+                    if v.get("num") == version:
+                        # crates.io API includes features but not build script directly
+                        # Check if crate has links (implies build script)
+                        if v.get("links"):
+                            warnings.append(f"build.rs: crate links to native library '{v['links']}'")
+                        # Check for proc-macro (runs at compile time)
+                        if "proc-macro" in str(v.get("features", {})):
+                            warnings.append("proc-macro: crate runs code at compile time")
+                        break
+
+        elif ecosystem == "rubygems":
+            # rubygems: native extensions (extconf.rb) run during install
+            data = scanner.fetch_json(f"https://rubygems.org/api/v1/gems/{pkg}.json")
+            if data:
+                extensions = data.get("extensions", []) or []
+                if extensions:
+                    warnings.append(
+                        f"native extensions: {', '.join(str(e) for e in extensions[:5])}"
+                    )
+                # Also check platform — if it's not "ruby" it has native code
+                platform = data.get("platform", "ruby")
+                if platform != "ruby":
+                    warnings.append(f"platform-specific: {platform}")
+
+        elif ecosystem == "packagist":
+            # composer: post-install-cmd, post-update-cmd scripts
+            data = scanner.fetch_json(
+                f"https://repo.packagist.org/p2/{pkg}.json"
+            )
+            if data:
+                pkgs = data.get("packages", {}).get(pkg, [])
+                if pkgs:
+                    latest = pkgs[0]
+                    # Composer packages may declare scripts in their composer.json
+                    # but Packagist doesn't expose this directly. Check for type=plugin
+                    pkg_type = latest.get("type", "library")
+                    if pkg_type == "composer-plugin":
+                        warnings.append("composer-plugin: runs code during install/update")
+
+        elif ecosystem == "homebrew":
+            # homebrew: post_install blocks in formula
+            # Already fetched by scanner — check for caveats or post_install
+            data = scanner.fetch_json(f"https://formulae.brew.sh/api/formula/{pkg}.json")
+            if data:
+                post_install = data.get("post_install_defined", False)
+                if post_install:
+                    warnings.append("post_install: formula runs code after installation")
+                caveats = data.get("caveats")
+                if caveats:
+                    warnings.append(f"caveats: {str(caveats)[:120]}")
+
+    except Exception:
+        pass
+
+    return "; ".join(warnings)
+
+
+async def _scan_packages(session_id: str, tool_name: str, tool_input: dict):
+    """Detect package installs in commands and run AVCP scanner."""
+    tn = tool_name.lower()
+    if tn not in ("bash", "execute", "execute_command"):
+        return
+    command = tool_input.get("command", "") or tool_input.get("script", "")
+    if not command or not _PKG_INSTALL_RE.search(command):
+        return
+
+    ecosystem = _detect_ecosystem(command)
+    if ecosystem == "unknown":
+        return
+
+    packages = _extract_packages(command, ecosystem)
+    if not packages:
+        return
+
+    ws_id = None
+    try:
+        from server import _session_workspace
+        ws_id = _session_workspace.get(session_id)
+    except Exception:
+        pass
+
+    # Run scanner in a thread to avoid blocking the event loop
+    import asyncio
+    import os
+    import sys
+
+    from resource_path import project_root as _pr, is_frozen as _is_frz
+    _frozen = _is_frz()
+    if _frozen:
+        scanner_bin = os.path.join(str(_pr()), "bin", "ive-avcp-scanner")
+    else:
+        scanner_path = os.path.join(str(_pr()), "anti-vibe-code-pwner", "lib", "scanner.py")
+
+    # Run scanner — subprocess for compiled binary, importlib for source
+    def _run_scan():
+        import subprocess
+        threshold = int(os.environ.get("AVCP_THRESHOLD", "7"))
+        try:
+            if _frozen:
+                # In compiled mode, call the binary via subprocess
+                import json as _json
+                results = []
+                for pkg in packages[:10]:
+                    try:
+                        proc = subprocess.run(
+                            [scanner_bin, "--json", ecosystem, pkg, str(threshold)],
+                            capture_output=True, text=True, timeout=30,
+                        )
+                        if proc.returncode == 0 and proc.stdout.strip():
+                            result = _json.loads(proc.stdout)
+                            results.append(result)
+                    except Exception:
+                        pass
+                return results
+            else:
+                # In source mode, import the scanner module directly
+                import importlib.util
+                spec = importlib.util.spec_from_file_location("avcp_scanner", scanner_path)
+                if not spec or not spec.loader:
+                    return []
+                scanner = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(scanner)
+                results = []
+                for pkg in packages[:10]:
+                    try:
+                        result = scanner.full_check(ecosystem, pkg, threshold)
+                        result["install_scripts"] = _detect_install_scripts(
+                            ecosystem, pkg, result, scanner, subprocess,
+                        )
+                        results.append(result)
+                    except Exception:
+                        pass
+                return results
+        except Exception as exc:
+            logger.debug("AVCP scanner failed: %s", exc)
+            return []
+
+    try:
+        results = await asyncio.get_event_loop().run_in_executor(None, _run_scan)
+    except Exception:
+        return
+
+    if not results:
+        return
+
+    # Persist to DB
+    try:
+        from db import get_db
+        db = await get_db()
+        try:
+            for r in results:
+                await db.execute(
+                    """INSERT INTO package_scans
+                       (session_id, workspace_id, package, ecosystem, version, age_days,
+                        status, vuln_count, vuln_critical, known_malware, decision, reason,
+                        advisories, install_scripts, fallback)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        session_id, ws_id,
+                        r.get("package", ""),
+                        r.get("ecosystem", ""),
+                        r.get("version", ""),
+                        r.get("age_days", -1),
+                        r.get("status", "ok"),
+                        r.get("vuln_count", 0),
+                        1 if r.get("vuln_critical") else 0,
+                        1 if r.get("known_malware") else 0,
+                        "flagged" if r.get("status") == "flagged" else "ok",
+                        r.get("reason", ""),
+                        json.dumps(r.get("advisories", [])),
+                        r.get("install_scripts", ""),
+                        r.get("fallback", ""),
+                    ),
+                )
+            await db.commit()
+        finally:
+            await db.close()
+    except Exception as exc:
+        logger.debug("Package scan persistence failed: %s", exc)
+
+
+# ─── Doom loop detection ────────────────────────────────────────────
+
+_DOOM_LOOP_THROTTLE = 60.0  # seconds between warnings per session
+
+# Cached flag: avoids DB query on every PostToolUse
+_doom_loop_enabled: dict[str, float] = {}  # {"enabled": bool, "ts": float}
+_DOOM_CACHE_TTL = 30.0
+
+
+async def _is_doom_loop_enabled() -> bool:
+    """Check if doom loop detection is enabled (cached 30s)."""
+    cached = _doom_loop_enabled.get("ts", 0.0)
+    if time.monotonic() - cached < _DOOM_CACHE_TTL:
+        return _doom_loop_enabled.get("enabled", False)
+    try:
+        from db import get_db
+        db = await get_db()
+        try:
+            cur = await db.execute(
+                "SELECT value FROM app_settings WHERE key = 'experimental_doom_loop_detection'"
+            )
+            row = await cur.fetchone()
+            enabled = bool(row and row["value"] == "on")
+            _doom_loop_enabled["enabled"] = enabled
+            _doom_loop_enabled["ts"] = time.monotonic()
+            return enabled
+        finally:
+            await db.close()
+    except Exception:
+        return False
+
+
+def _hash_tool_input(tool_input: dict) -> str:
+    """Produce a short stable hash of tool input for comparison."""
+    raw = json.dumps(tool_input, sort_keys=True, default=str)
+    return hashlib.md5(raw.encode()).hexdigest()[:12]
+
+
+async def _check_doom_loop(session_id: str, tool_name: str, tool_input: dict,
+                           agent_id: str | None = None):
+    """Detect repeated tool call patterns and inject corrective guidance.
+
+    Patterns detected:
+      1. Consecutive repeats: same (tool, input_hash) 3+ times in a row
+      2. Cyclic patterns: A→B→A→B (length-2 cycles repeated twice)
+
+    Skips subagent tool calls — subagents doing repeated search/read is
+    normal behavior (e.g. an Explore agent reading many files).
+    """
+    # Skip subagent tool calls — their repetition is usually intentional
+    if agent_id:
+        return
+
+    if not await _is_doom_loop_enabled():
+        return
+
+    s = _get_state(session_id)
+    input_hash = _hash_tool_input(tool_input)
+    history = s["tool_history"]
+    history.append((tool_name, input_hash))
+
+    if len(history) < 3:
+        return
+
+    now = time.monotonic()
+    if now - s["last_doom_warning_at"] < _DOOM_LOOP_THROTTLE:
+        return
+
+    pattern_detected = None
+    recent = list(history)
+
+    # Pattern 1: Same (tool, hash) 3+ times consecutively
+    last = recent[-1]
+    consecutive = 0
+    for entry in reversed(recent):
+        if entry == last:
+            consecutive += 1
+        else:
+            break
+    if consecutive >= 3:
+        pattern_detected = f"repeated {tool_name} with same input {consecutive} times"
+
+    # Pattern 2: A→B→A→B cycle (length-2, repeated at least twice = 4 entries)
+    if not pattern_detected and len(recent) >= 4:
+        a, b = recent[-2], recent[-1]
+        if a != b and len(recent) >= 4:
+            if recent[-4] == a and recent[-3] == b:
+                pattern_detected = f"cycling between {a[0]} and {b[0]}"
+
+    # Pattern 3: A→B→C→A→B→C cycle (length-3, repeated at least twice = 6 entries)
+    if not pattern_detected and len(recent) >= 6:
+        a, b, c = recent[-3], recent[-2], recent[-1]
+        if len({a, b, c}) == 3:
+            if recent[-6] == a and recent[-5] == b and recent[-4] == c:
+                pattern_detected = f"cycling through {a[0]} → {b[0]} → {c[0]}"
+
+    if not pattern_detected:
+        return
+
+    s["last_doom_warning_at"] = now
+    logger.warning("Doom loop detected in session %s: %s", session_id[:8], pattern_detected)
+
+    # Broadcast to UI
+    await _broadcast({
+        "type": "doom_loop_warning",
+        "session_id": session_id,
+        "pattern": pattern_detected,
+    })
+
+    # Queue corrective message for delivery at next idle
+    nudge = (
+        f"[Commander] Loop detected: {pattern_detected}. "
+        "You appear to be stuck in a repetitive pattern. "
+        "Stop and try a fundamentally different approach — "
+        "different tool, different strategy, or ask the user for clarification."
+    )
+    _queue_pty_warning(session_id, nudge, priority="heads_up", source="doom_loop")
+
+
+# ─── Auto session title ─────────────────────────────────────────────
+
+async def _maybe_auto_title(session_id: str):
+    """On first idle, generate a short title for the session using a cheap LLM call.
+
+    Gated behind the 'auto_session_titles' general setting (default: on).
+    """
+    s = _get_state(session_id)
+    s["idle_count"] = s.get("idle_count", 0) + 1
+
+    # Fire on the 1st idle (Stop/TURN_COMPLETE fires after the first real response;
+    # CLI boot prompt triggers Notification/idle_prompt, not Stop, so idle_count 1
+    # is reliably the first completed turn).
+    if s["idle_count"] != 1 or s.get("titled"):
+        return
+    s["titled"] = True
+
+    try:
+        from db import get_db
+        db = await get_db()
+        try:
+            # Check setting (default on — only skip if explicitly "off")
+            cur = await db.execute(
+                "SELECT value FROM app_settings WHERE key = 'auto_session_titles'"
+            )
+            row = await cur.fetchone()
+            if row and row["value"] == "off":
+                return
+
+            # Get session info + workspace path for JSONL access
+            cur = await db.execute(
+                """SELECT s.name, s.cli_type, s.session_type, s.native_session_id,
+                          w.path AS workspace_path
+                   FROM sessions s
+                   LEFT JOIN workspaces w ON s.workspace_id = w.id
+                   WHERE s.id = ?""",
+                (session_id,),
+            )
+            sess = await cur.fetchone()
+            if not sess:
+                return
+
+            # Skip commander/tester/documentor — they have meaningful names already
+            if sess["session_type"] in ("commander", "tester", "documentor"):
+                return
+
+            # Skip if user already gave a custom name (not the default pattern)
+            name = sess["name"] or ""
+            if name and not name.startswith("Session ") and not name.startswith("session-"):
+                return
+
+            cli_type = sess["cli_type"] or "claude"
+            native_sid = sess["native_session_id"]
+            workspace_path = sess["workspace_path"]
+        finally:
+            await db.close()
+
+        # Build context: prefer JSONL conversation (clean, structured) over
+        # terminal buffer (noisy — contains CLI chrome, update banners, ANSI remnants).
+        context = ""
+        if native_sid and workspace_path:
+            try:
+                context = _extract_conversation_context(native_sid, workspace_path)
+            except Exception:
+                pass
+
+        # Fall back to terminal buffer if JSONL unavailable
+        if not context and _capture_proc:
+            try:
+                context = _capture_proc.get_buffer(session_id, lines=30).strip()
+            except Exception:
+                pass
+
+        if not context or len(context) < 20:
+            return  # Not enough content to title
+
+        # Fire background title generation
+        import asyncio as _aio
+        _aio.create_task(_generate_title(session_id, cli_type, context))
+
+    except Exception as e:
+        logger.debug("Auto-title check failed: %s", e)
+
+
+def _extract_conversation_context(native_session_id: str, workspace_path: str,
+                                   max_chars: int = 2000) -> str:
+    """Extract clean user/assistant text from JSONL for title generation.
+
+    Returns a compact transcript without CLI chrome, ANSI codes, or metadata.
+    """
+    from pathlib import Path
+    from history_reader import read_session_messages, normalize_jsonl_entry
+
+    ws_norm = workspace_path.replace("/", "-")
+    project_dir = Path.home() / ".claude" / "projects" / ws_norm
+    jsonl_file = project_dir / f"{native_session_id}.jsonl"
+
+    if not jsonl_file.exists():
+        return ""
+
+    messages = read_session_messages(str(jsonl_file))
+    if not messages:
+        return ""
+
+    lines: list[str] = []
+    total = 0
+    for msg in messages:
+        entry = normalize_jsonl_entry(msg)
+        if entry is None:
+            continue
+        role, content = entry
+
+        # Extract text from content blocks (skip thinking/tool blocks)
+        if isinstance(content, list):
+            text_parts = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text_parts.append(block.get("text", ""))
+                elif isinstance(block, str):
+                    text_parts.append(block)
+            content = " ".join(text_parts)
+
+        if not content or not content.strip():
+            continue
+
+        text = content.strip()
+        if len(text) > 300:
+            text = text[:300] + "..."
+
+        line = f"{role.capitalize()}: {text}"
+        lines.append(line)
+        total += len(line)
+        if total > max_chars:
+            break
+
+    return "\n".join(lines)
+
+
+async def _generate_title(session_id: str, cli_type: str, context: str):
+    """Background task: call cheap LLM to generate a session title."""
+    try:
+        from llm_router import llm_call
+
+        # Use cheapest model per CLI
+        model = "haiku" if cli_type == "claude" else "gemini-2.5-flash"
+
+        # Truncate context to save tokens
+        if len(context) > 2000:
+            context = context[:2000]
+
+        title = await llm_call(
+            cli=cli_type,
+            model=model,
+            prompt=(
+                "Based on this conversation, generate a SHORT title (3-6 words, no quotes, no punctuation at end). "
+                "Focus on what the user asked or is working on. Ignore CLI UI elements, error messages, or update notices. "
+                "Return ONLY the title text, nothing else.\n\n"
+                f"Conversation:\n{context}"
+            ),
+            timeout=30,
+        )
+
+        title = title.strip().strip('"\'').strip()
+        if not title or len(title) > 80 or len(title) < 3:
+            return
+
+        # Re-check session name before updating — user may have renamed
+        # during the LLM call, and we must not overwrite their choice.
+        from db import get_db
+        db = await get_db()
+        try:
+            cur = await db.execute(
+                "SELECT name FROM sessions WHERE id = ?", (session_id,),
+            )
+            row = await cur.fetchone()
+            if not row:
+                return
+            current_name = row["name"] or ""
+            # Abort if user gave a custom name while we were generating
+            if current_name and not current_name.startswith("Session ") and not current_name.startswith("session-"):
+                return
+
+            await db.execute(
+                "UPDATE sessions SET name = ? WHERE id = ?",
+                (title, session_id),
+            )
+            await db.commit()
+        finally:
+            await db.close()
+
+        await _broadcast({
+            "type": "session_renamed",
+            "session_id": session_id,
+            "name": title,
+        })
+        logger.info("Auto-titled session %s: %s", session_id[:8], title)
+
+    except Exception as e:
+        logger.debug("Auto-title generation failed for %s: %s", session_id[:8], e)
+
+
 # ─── Event handlers ──────────────────────────────────────────────────
 
 async def _handle_stop(session_id: str, payload: dict):
@@ -320,6 +1091,12 @@ async def _handle_stop(session_id: str, payload: dict):
         await _deliver_pending_warnings(session_id)
     except Exception as e:
         logger.debug("Pending warning delivery failed: %s", e)
+
+    # Auto session title: generate a title on first real idle
+    try:
+        await _maybe_auto_title(session_id)
+    except Exception as e:
+        logger.debug("Auto-title check failed: %s", e)
 
 
 def _extract_options(payload: dict) -> list[dict]:
@@ -543,6 +1320,17 @@ async def _handle_post_tool_use(session_id: str, payload: dict):
         tool_event["agent_type"] = agent_type
     await _broadcast(tool_event)
 
+    # Compliance: log commands, external access, and package scans
+    try:
+        tool_input = payload.get("tool_input") or {}
+        await _log_command(session_id, tool_name, tool_input)
+        await _log_external_access(session_id, tool_name, tool_input)
+        # Package scan is async (runs scanner in background thread)
+        import asyncio as _c_aio
+        _c_aio.create_task(_scan_packages(session_id, tool_name, tool_input))
+    except Exception:
+        pass
+
     # Safety Gate: correlate PostToolUse with pending safety decisions.
     # If PostToolUse fires, the user approved the tool execution.
     tool_use_id = payload.get("tool_use_id")
@@ -610,6 +1398,13 @@ async def _handle_post_tool_use(session_id: str, payload: dict):
                 await _w2w_check_file_conflict(session_id, file_path)
             except Exception:
                 pass  # never let conflict detection affect the session
+
+    # Doom loop detection: check for repeated tool call patterns
+    try:
+        tool_input = payload.get("tool_input") or {}
+        await _check_doom_loop(session_id, tool_name, tool_input, agent_id=agent_id)
+    except Exception:
+        pass  # doom loop detection never affects the session
 
 
 # ── W2W: PTY warning queue + delivery ──────────────────────────────────

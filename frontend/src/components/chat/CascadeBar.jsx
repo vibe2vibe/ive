@@ -42,9 +42,10 @@ export default function CascadeBar() {
 
 function CascadeBarUI({ runner, sessionStatus, onStop }) {
   const { name, steps, currentStep, totalSteps, loop, running, iteration, status, runId } = runner
-  const stepNum = currentStep + 1
-  const total = totalSteps || (steps ? steps.length : 0)
-  const currentPrompt = steps ? (steps[currentStep] || '') : ''
+  const safeSteps = Array.isArray(steps) ? steps : []
+  const stepNum = (currentStep || 0) + 1
+  const total = totalSteps || safeSteps.length
+  const currentPrompt = safeSteps.length > 0 ? String(safeSteps[currentStep] || '') : ''
   const progress = total > 0 ? (stepNum / total) * 100 : 0
 
   const handlePause = async () => {

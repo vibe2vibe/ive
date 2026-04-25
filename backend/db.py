@@ -736,6 +736,72 @@ CREATE INDEX IF NOT EXISTS idx_safety_decisions_tool_use
 CREATE INDEX IF NOT EXISTS idx_safety_decisions_pattern
     ON safety_decisions(tool_name, decision);
 
+-- Compliance: every external source accessed by agents
+CREATE TABLE IF NOT EXISTS external_access_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT,
+    workspace_id TEXT,
+    tool_name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    domain TEXT,
+    source_type TEXT DEFAULT 'unknown',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_external_access_session
+    ON external_access_log(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_external_access_domain
+    ON external_access_log(domain, created_at);
+
+-- Compliance: every command executed by agents
+CREATE TABLE IF NOT EXISTS command_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT,
+    workspace_id TEXT,
+    command TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_command_log_session
+    ON command_log(session_id, created_at);
+
+-- Compliance: package install scans with AVCP results
+CREATE TABLE IF NOT EXISTS package_scans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT,
+    workspace_id TEXT,
+    package TEXT NOT NULL,
+    ecosystem TEXT NOT NULL,
+    version TEXT DEFAULT '',
+    age_days INTEGER DEFAULT -1,
+    status TEXT DEFAULT 'ok',
+    vuln_count INTEGER DEFAULT 0,
+    vuln_critical INTEGER DEFAULT 0,
+    known_malware INTEGER DEFAULT 0,
+    decision TEXT DEFAULT 'allow',
+    reason TEXT DEFAULT '',
+    advisories TEXT DEFAULT '[]',
+    install_scripts TEXT DEFAULT '',
+    llm_verdict TEXT DEFAULT '',
+    fallback TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_package_scans_session
+    ON package_scans(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_package_scans_package
+    ON package_scans(package, ecosystem);
+
+-- Compliance: install-script allowlist (packages approved to run install scripts)
+CREATE TABLE IF NOT EXISTS install_script_allowlist (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    package TEXT NOT NULL,
+    ecosystem TEXT NOT NULL,
+    reason TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(package, ecosystem)
+);
+
 -- Pipeline Engine: configurable graph-based pipelines
 CREATE TABLE IF NOT EXISTS pipeline_definitions (
     id TEXT PRIMARY KEY,
@@ -782,6 +848,87 @@ CREATE INDEX IF NOT EXISTS idx_pipeline_runs_workspace
     ON pipeline_runs(workspace_id, status);
 CREATE INDEX IF NOT EXISTS idx_pipeline_runs_task
     ON pipeline_runs(task_id);
+
+-- ─── Observatory: automated ecosystem scanner ───────────────────
+CREATE TABLE IF NOT EXISTS observatory_findings (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT,
+    source TEXT NOT NULL,
+    source_url TEXT,
+    title TEXT NOT NULL,
+    description TEXT,
+    category TEXT DEFAULT 'integrate',
+    relevance_score REAL DEFAULT 0,
+    proposal TEXT,
+    steal_targets TEXT DEFAULT '[]',
+    tags TEXT DEFAULT '[]',
+    notes TEXT,
+    status TEXT DEFAULT 'new',
+    promoted_task_id TEXT,
+    metadata TEXT DEFAULT '{}',
+    scan_id TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_observatory_findings_source
+    ON observatory_findings(source, relevance_score DESC);
+CREATE INDEX IF NOT EXISTS idx_observatory_findings_status
+    ON observatory_findings(status);
+CREATE INDEX IF NOT EXISTS idx_observatory_findings_workspace
+    ON observatory_findings(workspace_id);
+
+CREATE TABLE IF NOT EXISTS observatory_scans (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT,
+    source TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    findings_count INTEGER DEFAULT 0,
+    error TEXT,
+    started_at TEXT,
+    completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS observatory_sources (
+    workspace_id TEXT NOT NULL DEFAULT '__global__',
+    source TEXT NOT NULL,
+    enabled INTEGER DEFAULT 0,
+    interval_hours INTEGER DEFAULT 24,
+    mode TEXT DEFAULT 'both',
+    keywords TEXT DEFAULT '[]',
+    last_scan_at TEXT,
+    PRIMARY KEY (workspace_id, source)
+);
+
+CREATE TABLE IF NOT EXISTS research_schedules (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT,
+    query TEXT NOT NULL,
+    mode TEXT DEFAULT 'auto',
+    mcp_server_ids TEXT DEFAULT '[]',
+    plan TEXT DEFAULT '{}',
+    interval_hours INTEGER DEFAULT 24,
+    enabled INTEGER DEFAULT 1,
+    last_run_at TEXT,
+    next_run_at TEXT,
+    last_job_id TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- ─── Performance indexes for high-frequency queries ──────────────────
+CREATE INDEX IF NOT EXISTS idx_sessions_workspace
+    ON sessions(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_status
+    ON sessions(status);
+CREATE INDEX IF NOT EXISTS idx_messages_session
+    ON messages(session_id);
+CREATE INDEX IF NOT EXISTS idx_session_mcp_servers_session
+    ON session_mcp_servers(session_id);
+CREATE INDEX IF NOT EXISTS idx_session_guidelines_session
+    ON session_guidelines(session_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_workspace_status
+    ON tasks(workspace_id, status);
 """
 
 
@@ -1148,6 +1295,13 @@ async def init_db():
             "ALTER TABLE workspaces ADD COLUMN task_dependencies_enabled INTEGER DEFAULT 0",
             # Grid templates: scope to workspace
             "ALTER TABLE grid_templates ADD COLUMN workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE",
+            # Session archive & post-hoc summary
+            "ALTER TABLE sessions ADD COLUMN archived INTEGER DEFAULT 0",
+            "ALTER TABLE sessions ADD COLUMN summary TEXT",
+            # Package scans: LLM verdict for install script analysis
+            "ALTER TABLE package_scans ADD COLUMN llm_verdict TEXT DEFAULT ''",
+            # Memory injection tracking: JSON with count + chars injected at PTY start
+            "ALTER TABLE sessions ADD COLUMN memory_injected_info TEXT",
         ):
             try:
                 await db.execute(ddl)

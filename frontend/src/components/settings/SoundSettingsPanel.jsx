@@ -76,6 +76,7 @@ export default function SoundSettingsPanel({ onClose }) {
         <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border-primary">
           <Bell size={14} className="text-amber-400" />
           <span className="text-xs text-text-primary font-medium">Sound Notifications</span>
+          <span className="text-[10px] text-zinc-400/70 px-1.5 py-0.5 bg-zinc-500/8 rounded border border-zinc-500/15">This device</span>
           <div className="flex-1" />
           <button
             onClick={onClose}

@@ -27,12 +27,13 @@ export const KEYBINDING_DEFS = [
   { id: 'composer', label: 'Composer', section: 'Panels', defaultKey: { key: 'e', meta: true } },
   { id: 'scratchpad', label: 'Scratchpad', section: 'Panels', defaultKey: { key: 'j', meta: true } },
   { id: 'inbox', label: 'Inbox', section: 'Panels', defaultKey: { key: 'i', meta: true } },
-  { id: 'research', label: 'Research Panel', section: 'Panels', defaultKey: { key: 'r', meta: true } },
+  { id: 'research', label: 'Research Hub', section: 'Panels', defaultKey: { key: 'r', meta: true } },
   { id: 'marketplace', label: 'Plugins & Skills', section: 'Panels', defaultKey: { key: 'M', meta: true, shift: true } },
   { id: 'skillsLibrary', label: 'Agent Skills Library', section: 'Panels', defaultKey: null },
   { id: 'codeReview', label: 'Code Review', section: 'Panels', defaultKey: { key: 'G', meta: true, shift: true } },
   { id: 'annotate', label: 'Annotate Output', section: 'Panels', defaultKey: { key: 'A', meta: true, shift: true } },
   { id: 'quickFeature', label: 'Quick Feature', section: 'Panels', defaultKey: { key: 'N', meta: true, shift: true } },
+  { id: 'observatory', label: 'Research Hub — Feed', section: 'Panels', defaultKey: { key: 'O', meta: true, shift: true } },
   { id: 'shortcuts', label: 'Keyboard Shortcuts', section: 'Panels', defaultKey: { key: '?', meta: true, shift: true } },
 
   // ── Sessions ──

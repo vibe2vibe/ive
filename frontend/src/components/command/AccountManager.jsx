@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { User, X, Trash2, Plus, Eye, EyeOff, CheckCircle, AlertCircle, Zap, RefreshCw, Globe, SkipForward, Timer } from 'lucide-react'
+import { User, X, Trash2, Plus, Eye, EyeOff, CheckCircle, AlertCircle, Zap, RefreshCw, Globe, SkipForward, Timer, Theater, KeyRound } from 'lucide-react'
 import { api } from '../../lib/api'
 import usePanelCreate from '../../hooks/usePanelCreate'
 import useListKeyboardNav from '../../hooks/useListKeyboardNav'
@@ -40,6 +40,8 @@ export default function AccountManager({ onClose }) {
   const [editProfile, setEditProfile] = useState('')
   const [editingBrowser, setEditingBrowser] = useState(false)
   const [tick, setTick] = useState(0) // drives countdown re-renders
+  const [pwBusy, setPwBusy] = useState(null) // account id with in-flight Playwright op
+  const [authStatuses, setAuthStatuses] = useState({}) // id → { has_browser_context, has_auth_snapshot }
   const listRef = useRef(null)
   const panelRef = useRef(null)
 
@@ -70,6 +72,53 @@ export default function AccountManager({ onClose }) {
       })
     }
   }, [tick])
+
+  // Fetch Playwright auth status for all accounts
+  useEffect(() => {
+    for (const acc of accounts) {
+      if (acc.id === '__system') continue
+      api.getAuthStatus(acc.id).then((s) => {
+        setAuthStatuses((prev) => ({ ...prev, [acc.id]: s }))
+      }).catch(() => {})
+    }
+  }, [accounts.length])
+
+  const handleSetupBrowser = async (acc, cliType) => {
+    setPwBusy(acc.id)
+    try {
+      const result = await api.setupBrowser(acc.id, cliType)
+      if (result.ok) {
+        alert(result.message || 'Browser context saved.')
+      } else {
+        alert(result.message || result.error || 'Setup failed')
+      }
+      const s = await api.getAuthStatus(acc.id)
+      setAuthStatuses((prev) => ({ ...prev, [acc.id]: s }))
+    } catch (e) {
+      alert('Setup failed: ' + e.message)
+    }
+    setPwBusy(null)
+  }
+
+  const handlePlaywrightAuth = async (acc, cliType) => {
+    setPwBusy(acc.id)
+    try {
+      const result = await api.playwrightAuth(acc.id, { cliType })
+      if (result.status === 'success') {
+        alert(result.message || 'Auth completed.')
+        const updated = await api.getAccounts()
+        setAccounts(updated)
+        setSelected(updated.find((a) => a.id === acc.id))
+      } else {
+        alert(result.error || 'Auth failed')
+      }
+      const s = await api.getAuthStatus(acc.id)
+      setAuthStatuses((prev) => ({ ...prev, [acc.id]: s }))
+    } catch (e) {
+      alert('Auth failed: ' + e.message)
+    }
+    setPwBusy(null)
+  }
 
   const handleCreate = async (e) => {
     e?.preventDefault?.()
@@ -376,6 +425,20 @@ export default function AccountManager({ onClose }) {
                       </button>
                     </p>
                   </div>
+                  {selected.id !== '__system' && authStatuses[selected.id] && (
+                    <div className="col-span-2">
+                      <label className="text-[11px] text-zinc-600 uppercase">Playwright</label>
+                      <p className="text-zinc-400 flex items-center gap-2">
+                        <span className={authStatuses[selected.id].has_browser_context ? 'text-violet-400' : 'text-zinc-600'}>
+                          {authStatuses[selected.id].has_browser_context ? 'browser context saved' : 'no browser context'}
+                        </span>
+                        <span className="text-zinc-700">|</span>
+                        <span className={authStatuses[selected.id].has_auth_snapshot ? 'text-green-400' : 'text-zinc-600'}>
+                          {authStatuses[selected.id].has_auth_snapshot ? 'auth snapshot ready' : 'no snapshot'}
+                        </span>
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Browser / Chrome profile settings */}
@@ -479,6 +542,46 @@ export default function AccountManager({ onClose }) {
                       <RefreshCw size={10} />
                       snapshot auth
                     </button>
+                    <button
+                      onClick={() => handleSetupBrowser(selected, 'claude')}
+                      disabled={pwBusy === selected.id}
+                      className="flex items-center gap-1 px-1.5 py-1.5 text-[11px] bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 rounded transition-colors disabled:opacity-50"
+                      title="Open Playwright browser to log into Anthropic — saves cookies for headless re-auth"
+                    >
+                      <Theater size={10} />
+                      {pwBusy === selected.id ? 'opening...' : 'setup claude'}
+                    </button>
+                    <button
+                      onClick={() => handleSetupBrowser(selected, 'gemini')}
+                      disabled={pwBusy === selected.id}
+                      className="flex items-center gap-1 px-1.5 py-1.5 text-[11px] bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 rounded transition-colors disabled:opacity-50"
+                      title="Open Playwright browser to log into Google — saves cookies for headless re-auth"
+                    >
+                      <Theater size={10} />
+                      {pwBusy === selected.id ? 'opening...' : 'setup gemini'}
+                    </button>
+                    {authStatuses[selected.id]?.has_browser_context && (
+                      <>
+                        <button
+                          onClick={() => handlePlaywrightAuth(selected, 'claude')}
+                          disabled={pwBusy === selected.id}
+                          className="flex items-center gap-1 px-1.5 py-1.5 text-[11px] bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 rounded transition-colors disabled:opacity-50"
+                          title="Re-authenticate Claude CLI using saved Playwright cookies (headless)"
+                        >
+                          <KeyRound size={10} />
+                          {pwBusy === selected.id ? 'authing...' : 'auth claude'}
+                        </button>
+                        <button
+                          onClick={() => handlePlaywrightAuth(selected, 'gemini')}
+                          disabled={pwBusy === selected.id}
+                          className="flex items-center gap-1 px-1.5 py-1.5 text-[11px] bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 rounded transition-colors disabled:opacity-50"
+                          title="Re-authenticate Gemini CLI using saved Playwright cookies (headless)"
+                        >
+                          <KeyRound size={10} />
+                          {pwBusy === selected.id ? 'authing...' : 'auth gemini'}
+                        </button>
+                      </>
+                    )}
                     {!selected.is_default && (
                       <button
                         onClick={() => handleSetDefault(selected)}

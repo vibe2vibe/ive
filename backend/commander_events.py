@@ -130,6 +130,9 @@ class CommanderEvent(str, Enum):
     SESSION_ANALYZED                = "session_analyzed"
     GUIDELINE_EFFECTIVENESS_UPDATED = "guideline_effectiveness_updated"
 
+    # ── Skill Suggester ─────────────────────────────────────────────
+    SKILL_SUGGESTED                 = "skill_suggested"
+
     # ── Safety Gate ──────────────────────────────────────────────────
     SAFETY_RULE_TRIGGERED   = "safety_rule_triggered"
     SAFETY_RULE_PROPOSED    = "safety_rule_proposed"
@@ -142,6 +145,12 @@ class CommanderEvent(str, Enum):
     DOCUMENTOR_STARTED       = "documentor_started"
     DOCS_UPDATE_NEEDED       = "docs_update_needed"
     DOCS_BUILD_COMPLETED     = "docs_build_completed"
+
+    # ── Observatory ─────────────────────────────────────────────────
+    OBSERVATORY_SCAN_STARTED    = "observatory_scan_started"
+    OBSERVATORY_SCAN_COMPLETED  = "observatory_scan_completed"
+    OBSERVATORY_FINDING_CREATED = "observatory_finding_created"
+    OBSERVATORY_FINDING_PROMOTED = "observatory_finding_promoted"
 
 
 COMMANDER_EVENT_LABELS: dict[CommanderEvent, str] = {
@@ -226,6 +235,8 @@ COMMANDER_EVENT_LABELS: dict[CommanderEvent, str] = {
     CommanderEvent.GUIDELINE_RECOMMENDED:           "Guideline recommended for session",
     CommanderEvent.SESSION_ANALYZED:                 "Session quality analyzed",
     CommanderEvent.GUIDELINE_EFFECTIVENESS_UPDATED:  "Guideline effectiveness updated",
+    # Skill Suggester
+    CommanderEvent.SKILL_SUGGESTED:                  "Skills suggested for session",
     # Safety Gate
     CommanderEvent.SAFETY_RULE_TRIGGERED: "Safety rule triggered",
     CommanderEvent.SAFETY_RULE_PROPOSED:  "Safety rule proposed from patterns",
@@ -236,6 +247,11 @@ COMMANDER_EVENT_LABELS: dict[CommanderEvent, str] = {
     CommanderEvent.DOCUMENTOR_STARTED:   "Documentor session started",
     CommanderEvent.DOCS_UPDATE_NEEDED:   "Documentation update requested",
     CommanderEvent.DOCS_BUILD_COMPLETED: "Documentation site built",
+    # Observatory
+    CommanderEvent.OBSERVATORY_SCAN_STARTED:    "Observatory scan started",
+    CommanderEvent.OBSERVATORY_SCAN_COMPLETED:  "Observatory scan completed",
+    CommanderEvent.OBSERVATORY_FINDING_CREATED: "Observatory finding created",
+    CommanderEvent.OBSERVATORY_FINDING_PROMOTED: "Observatory finding promoted to task",
 }
 
 
@@ -313,6 +329,8 @@ COMMANDER_EVENT_CATEGORIES: dict[CommanderEvent, str] = {
     CommanderEvent.GUIDELINE_RECOMMENDED:           "advisor",
     CommanderEvent.SESSION_ANALYZED:                 "advisor",
     CommanderEvent.GUIDELINE_EFFECTIVENESS_UPDATED:  "advisor",
+    # Skill Suggester
+    CommanderEvent.SKILL_SUGGESTED:                  "advisor",
     # Safety Gate
     CommanderEvent.SAFETY_RULE_TRIGGERED: "safety",
     CommanderEvent.SAFETY_RULE_PROPOSED:  "safety",
@@ -323,6 +341,11 @@ COMMANDER_EVENT_CATEGORIES: dict[CommanderEvent, str] = {
     CommanderEvent.DOCUMENTOR_STARTED:   "documentor",
     CommanderEvent.DOCS_UPDATE_NEEDED:   "documentor",
     CommanderEvent.DOCS_BUILD_COMPLETED: "documentor",
+    # Observatory
+    CommanderEvent.OBSERVATORY_SCAN_STARTED:    "observatory",
+    CommanderEvent.OBSERVATORY_SCAN_COMPLETED:  "observatory",
+    CommanderEvent.OBSERVATORY_FINDING_CREATED: "observatory",
+    CommanderEvent.OBSERVATORY_FINDING_PROMOTED: "observatory",
 }
 
 

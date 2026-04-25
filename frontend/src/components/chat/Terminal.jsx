@@ -376,9 +376,10 @@ export default function TerminalView({ sessionId }) {
       let dims = fit.proposeDimensions()
       if (!dims || !dims.cols || !dims.rows) {
         // Renderer hasn't computed cell metrics yet (element not painted).
-        // Retry up to 5 times — covers view-switch remounts where some
-        // terminals get painted later than others.
-        if (fitRetries < 5) {
+        // Retry up to 10 times — covers view-switch remounts and returning
+        // from overlays (MissionControl, etc.) where opacity transitions
+        // delay when the element becomes measurable.
+        if (fitRetries < 10) {
           fitRetries++
           setTimeout(fitWithMinimum, 100)
         }
@@ -496,6 +497,7 @@ export default function TerminalView({ sessionId }) {
             }
           } catch (err) {
             console.error('Paste upload failed:', err)
+            useStore.getState().addNotification?.({ type: 'error', message: 'Image paste failed' })
           }
           return
         }
@@ -600,13 +602,36 @@ export default function TerminalView({ sessionId }) {
     if (ctrl) ctrl.refit = doResize
 
     const observer = new ResizeObserver(sendResize)
-    observer.observe(wrapper || el)
+    // Observe the element itself (not the wrapper) so the observer fires
+    // when React moves the element to a different parent (e.g. grid hidden
+    // container → visible grid cell).  Also observe the wrapper if it exists
+    // so layout changes on the parent still trigger a refit.
+    observer.observe(el)
+    if (wrapper && wrapper !== el) observer.observe(wrapper)
 
     // Refit immediately on grid layout / workspace changes (dispatched by App.jsx).
     // Bypasses the 200ms debounce in sendResize since the event is already
     // appropriately timed (double-rAF from the grid refit effect).
     const refitListener = () => doResize()
     window.addEventListener('cc-terminal-refit', refitListener)
+
+    // IntersectionObserver: detect when this terminal transitions from
+    // hidden (1x1px off-screen container in grid mode) to visible (real
+    // grid cell).  The ResizeObserver alone can miss this because the
+    // observed wrapper node may be stale after React reparents the element.
+    let wasVisible = el.offsetWidth > 10
+    const intersectionObs = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        const nowVisible = entry.isIntersecting && entry.boundingClientRect.width > 10
+        if (nowVisible && !wasVisible) {
+          // Became visible — refit after layout settles
+          setTimeout(doResize, 80)
+          setTimeout(doResize, 300)
+        }
+        wasVisible = nowVisible
+      }
+    }, { threshold: 0.01 })
+    intersectionObs.observe(el)
 
     // Refit when the page regains visibility (e.g. switching back from another
     // app/window). In grid view all terminals are always mounted so the
@@ -645,13 +670,18 @@ export default function TerminalView({ sessionId }) {
         fitWithMinimum()
 
         const ws = useStore.getState().ws
-        if (ws?.readyState === WebSocket.OPEN && term.cols > 0 && term.rows > 0) {
+        // Fall back to MIN_COLS/MIN_ROWS when terminal is in a hidden container
+        // (e.g. background tab in grid mode at 1x1px). The refit on tab
+        // activation will send a resize with the correct dimensions later.
+        const cols = term.cols > 0 ? term.cols : MIN_COLS
+        const rows = term.rows > 0 ? term.rows : MIN_ROWS
+        if (ws?.readyState === WebSocket.OPEN) {
           startedSessions.add(sessionId)
           ws.send(JSON.stringify({
             action: 'start_pty',
             session_id: sessionId,
-            cols: term.cols,
-            rows: term.rows,
+            cols,
+            rows,
           }))
           term.focus()
           // First paint may not have happened yet — wait two frames so the
@@ -679,6 +709,7 @@ export default function TerminalView({ sessionId }) {
         inputDisp.dispose()
         xtermTextarea.removeEventListener('focus', focusHandler)
         observer.disconnect()
+        intersectionObs.disconnect()
         window.removeEventListener('cc-terminal-refit', refitListener)
         window.removeEventListener('cc-focus-terminal', focusListener)
         document.removeEventListener('visibilitychange', visibilityListener)
@@ -720,11 +751,13 @@ export default function TerminalView({ sessionId }) {
       terminalControls.delete(sessionId)
       inputDisp.dispose()
       observer.disconnect()
+      intersectionObs.disconnect()
       window.removeEventListener('cc-terminal-refit', refitListener)
       window.removeEventListener('cc-focus-terminal', focusListener)
       document.removeEventListener('visibilitychange', visibilityListener)
       window.removeEventListener('focus', windowFocusListener)
       el.removeEventListener('wheel', wheelHandler, { capture: true })
+      el.removeEventListener('paste', pasteHandler, { capture: true })
       el.removeEventListener('contextmenu', contextMenuHandler, { capture: true })
       term.dispose()
     }
@@ -734,24 +767,28 @@ export default function TerminalView({ sessionId }) {
   // Terminals are hidden via CSS opacity (not display:none), so
   // ResizeObserver doesn't fire on tab switch. Call refit directly
   // (bypasses the 200ms debounce in sendResize) after a double-rAF
-  // to let the browser flush layout from the opacity change. Without
-  // this the terminal can flash at 1-row height until new output arrives.
+  // to let the browser flush layout from the opacity change.
+  // We fire twice: once immediately after paint (double-rAF) for fast
+  // tab switches, and again at 200ms to catch cases where the CSS
+  // opacity transition hasn't settled yet (e.g. returning from
+  // MissionControl or other overlays where proposeDimensions() gets
+  // stale values during the transition).
   useEffect(() => {
     if (!isActive || !termRef.current) return
     let cancelled = false
+    const doRefit = () => {
+      if (cancelled) return
+      // In grid mode multiple terminals are visible — broadcast so ALL
+      // of them refit, not just the newly-active one.
+      window.dispatchEvent(new Event('cc-terminal-refit'))
+      try { termRef.current?.scrollToBottom() } catch {}
+    }
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (cancelled) return
-        const ctrl = terminalControls.get(sessionId)
-        if (ctrl?.refit) {
-          ctrl.refit()
-        } else {
-          window.dispatchEvent(new Event('cc-terminal-refit'))
-        }
-        try { termRef.current?.scrollToBottom() } catch {}
-      })
+      requestAnimationFrame(() => doRefit())
     })
-    return () => { cancelled = true }
+    // Safety-net refit after opacity transition settles
+    const t = setTimeout(doRefit, 200)
+    return () => { cancelled = true; clearTimeout(t) }
   }, [isActive, sessionId])
 
   const handleDragOver = (e) => {

@@ -3,7 +3,8 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   title: 'IVE',
   description: 'Integrated Vibecoding Environment — a local web app that spawns and manages multiple Claude Code and Gemini CLI sessions from a single browser UI.',
-  head: [['link', { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' }]],
+  base: '/docs/',
+  head: [['link', { rel: 'icon', href: '/docs/favicon.svg', type: 'image/svg+xml' }]],
   themeConfig: {
     logo: '/logo.svg',
     nav: [

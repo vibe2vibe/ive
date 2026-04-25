@@ -8,6 +8,7 @@ import pty
 import signal
 import struct
 import termios
+import threading
 from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ class PTYSession:
         self.master_fd: Optional[int] = None
         self.pid: Optional[int] = None
         self._alive = False
+        self._fd_lock = threading.Lock()  # serialize write() vs _close_fd()
         self._output_cb: Optional[Callable] = None
         self._exit_cb: Optional[Callable] = None
 
@@ -115,19 +117,22 @@ class PTYSession:
             await asyncio.sleep(0.1)
 
     def _close_fd(self):
-        if self.master_fd is not None:
-            try:
-                asyncio.get_event_loop().remove_reader(self.master_fd)
-            except Exception:
-                pass
-            try:
-                os.close(self.master_fd)
-            except OSError:
-                pass
-            self.master_fd = None
+        with self._fd_lock:
+            if self.master_fd is not None:
+                try:
+                    asyncio.get_event_loop().remove_reader(self.master_fd)
+                except Exception:
+                    pass
+                try:
+                    os.close(self.master_fd)
+                except OSError:
+                    pass
+                self.master_fd = None
 
-    def write(self, data: bytes):
-        if self.master_fd is not None and self._alive:
+    def write(self, data: bytes) -> bool:
+        with self._fd_lock:
+            if self.master_fd is None or not self._alive:
+                return False
             import errno as _errno
             import time as _time
             offset = 0
@@ -144,7 +149,8 @@ class PTYSession:
                         _time.sleep(0.01)  # 10ms
                     else:
                         logger.error(f"PTY write error: session={self.session_id} err={e}")
-                        break
+                        return False
+            return offset == len(data)
 
     def resize(self, cols: int, rows: int):
         if self.master_fd is None:

@@ -17,9 +17,12 @@ import sys
 import urllib.request
 import urllib.error
 
-# Add project root to path so we can import deep_research
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, _PROJECT_ROOT)
+# Add project root to path so we can import deep_research (source mode only;
+# in compiled mode Nuitka bundles deep_research via --include-package).
+_is_compiled = getattr(sys, "frozen", False) or "__compiled__" in globals()
+if not _is_compiled:
+    _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, _PROJECT_ROOT)
 
 import re as _re
 from datetime import datetime as _dt

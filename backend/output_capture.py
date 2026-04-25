@@ -103,11 +103,11 @@ GEMINI_CONTEXT_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Branch detection — matches "claude -r <uuid>" printed after /branch command.
-# The UUID identifies the ORIGINAL conversation (pre-branch) that should open
-# as a separate tab so the user keeps both conversations visible.
+# Branch detection — matches "claude --resume <uuid>" or "gemini --resume <index>"
+# printed after /branch command. The identifier is the ORIGINAL conversation
+# (pre-branch) that should open as a separate tab so the user keeps both visible.
 BRANCH_RE = re.compile(
-    r'claude\s+-r\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})',
+    r'(?:claude|gemini)\s+(?:-r|--resume)\s+([^\s]+)',
     re.IGNORECASE,
 )
 

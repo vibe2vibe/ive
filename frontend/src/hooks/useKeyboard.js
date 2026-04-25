@@ -106,6 +106,7 @@ export default function useKeyboard({
   onCodeReview,
   onAnnotate,
   onQuickFeature,
+  onObservatory,
 } = {}) {
   // Register capture-phase listener once (no deps) — survives re-renders
   useEffect(() => {
@@ -150,6 +151,7 @@ export default function useKeyboard({
       if (matchesKey(e, kb.codeReview))     { e.preventDefault(); onCodeReview?.(); return }
       if (matchesKey(e, kb.annotate))       { e.preventDefault(); onAnnotate?.(); return }
       if (matchesKey(e, kb.quickFeature))   { e.preventDefault(); onQuickFeature?.(); return }
+      if (matchesKey(e, kb.observatory))    { e.preventDefault(); onObservatory?.(); return }
       if (matchesKey(e, kb.splitView))       { e.preventDefault(); onSplitView?.(); return }
       if (matchesKey(e, kb.usage))           { e.preventDefault(); window.open('https://claude.ai/settings/usage', '_blank'); return }
 
@@ -334,7 +336,7 @@ export default function useKeyboard({
 
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [onCommandPalette, onPromptPalette, onGuidelinePanel, onMcpServers, onSplitView, onBroadcast, onSearch, onMissionControl, onInbox, onFeatureBoard, onPipelineEditor, onAgentTree, onScratchpad, onShortcuts, onResearch, onComposer, onPreview, onMarketplace, onQuickActionPalette, onSkillsLibrary, onCodeReview, onAnnotate, onQuickFeature])
+  }, [onCommandPalette, onPromptPalette, onGuidelinePanel, onMcpServers, onSplitView, onBroadcast, onSearch, onMissionControl, onInbox, onFeatureBoard, onPipelineEditor, onAgentTree, onScratchpad, onShortcuts, onResearch, onComposer, onPreview, onMarketplace, onQuickActionPalette, onSkillsLibrary, onCodeReview, onAnnotate, onQuickFeature, onObservatory])
 
   // ── Chrome focus mode ──
   // When a [data-chrome-button] has focus, plain arrow keys cycle through them,

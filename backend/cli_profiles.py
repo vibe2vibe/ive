@@ -486,6 +486,7 @@ GEMINI_PROFILE = CLIProfile(
     default_hook_events=[
         "AfterAgent", "Notification", "BeforeTool", "AfterTool",
         "SessionStart", "SessionEnd", "PreCompress",
+        "WorktreeCreate", "WorktreeRemove",
     ],
     # ── MCP / session detection ───────────────────────────────────────
     mcp_strategy="mcp_add",

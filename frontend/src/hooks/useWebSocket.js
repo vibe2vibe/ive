@@ -25,6 +25,28 @@ const NUDGE_COOLDOWN_MS = 30000
 const NUDGE_ACTIVE_STATUSES = new Set(['todo', 'planning', 'in_progress', 'review'])
 
 export default function useWebSocket() {
+  // Initialize multiplayer identity once on mount
+  useEffect(() => { useStore.getState().initIdentity() }, [])
+
+  // Broadcast active session changes as presence updates
+  useEffect(() => {
+    let prev = useStore.getState().activeSessionId
+    const unsub = useStore.subscribe((state) => {
+      if (state.activeSessionId !== prev) {
+        prev = state.activeSessionId
+        const { ws, myClientId } = state
+        if (ws && ws.readyState === WebSocket.OPEN && myClientId) {
+          ws.send(JSON.stringify({
+            action: 'presence_update',
+            client_id: myClientId,
+            viewing_session: state.activeSessionId,
+          }))
+        }
+      }
+    })
+    return unsub
+  }, [])
+
   useEffect(() => {
     // Use closure-local cancellation instead of a shared ref so React
     // StrictMode's double-mount can't leave a stale first-mount WebSocket
@@ -52,6 +74,11 @@ export default function useWebSocket() {
         }
         // Backend restarted — clear PTY tracking so terminals re-start
         startedSessions.clear()
+        // Send multiplayer hello
+        const { myClientId, myName, myColor } = useStore.getState()
+        if (myClientId) {
+          ws.send(JSON.stringify({ action: 'hello', client_id: myClientId, name: myName, color: myColor }))
+        }
       }
 
       ws.onclose = () => {
@@ -83,6 +110,14 @@ export default function useWebSocket() {
           // Branch sessions open as a background tab (no focus steal)
           if (data.auto_open) {
             store.openSessionInBackground(data.session.id)
+            // Notify user when a branch preserved their original conversation
+            if (data.parent_session_id) {
+              store.addNotification({
+                type: 'branch_created',
+                sessionId: data.session.id,
+                message: `Original conversation preserved as "${data.session.name || 'Session'}"`,
+              })
+            }
           }
           return
         }
@@ -112,6 +147,67 @@ export default function useWebSocket() {
         // Session Advisor: guideline recommendations
         if (data.type === 'guideline_recommendation') {
           window.dispatchEvent(new CustomEvent('cc-guideline_recommendation', { detail: data }))
+          return
+        }
+
+        // Skill Suggester: auto-matched skill suggestions
+        if (data.type === 'skill_suggestion') {
+          window.dispatchEvent(new CustomEvent('cc-skill_suggestion', { detail: data }))
+          return
+        }
+
+        // Doom loop detection warning
+        if (data.type === 'doom_loop_warning') {
+          const sess = useStore.getState().sessions[data.session_id]
+          useStore.getState().addNotification({
+            type: 'warning',
+            message: `Loop detected in ${sess?.name || 'session'}: ${data.pattern}`,
+            sessionId: data.session_id,
+          })
+          return
+        }
+
+        // Multiplayer presence events
+        if (data.type === 'presence_snapshot') {
+          useStore.getState().handlePresenceSnapshot(data.peers || [])
+          return
+        }
+        if (data.type === 'presence_join') {
+          useStore.getState().handlePresenceJoin(data)
+          return
+        }
+        if (data.type === 'presence_update') {
+          useStore.getState().handlePresenceUpdate(data)
+          return
+        }
+        if (data.type === 'presence_leave') {
+          useStore.getState().handlePresenceLeave(data)
+          return
+        }
+
+        // Task and pipeline updates are global (no session_id) — handle before the sid guard
+        if (data.type === 'task_update') {
+          const store = useStore.getState()
+          if (data.action === 'deleted' && data.task?.id) {
+            store.removeTaskFromStore(data.task.id)
+          } else if (data.task) {
+            store.updateTaskInStore(data.task)
+          }
+          return
+        }
+        if (data.type === 'pipeline_run_update') {
+          if (data.run) useStore.getState().handlePipelineRunUpdate(data.run)
+          return
+        }
+
+        // Memory sync conflict (workspace-scoped, no session_id)
+        if (data.type === 'memory_sync_conflict') {
+          useStore.getState().addNotification({
+            type: 'memory_sync_conflict',
+            message: `Memory sync: ${data.conflict_count} conflict${data.conflict_count !== 1 ? 's' : ''} detected`,
+            workspaceId: data.workspace_id,
+            conflictCount: data.conflict_count,
+          })
           return
         }
 
@@ -237,6 +333,16 @@ export default function useWebSocket() {
             break
           }
 
+          case 'session_archived': {
+            useStore.getState().setSessionArchived(data.session_id, data.archived)
+            break
+          }
+
+          case 'session_summary': {
+            useStore.getState().setSessionSummary(data.session_id, data.summary)
+            break
+          }
+
           case 'session_popped_out': {
             const store = useStore.getState()
             const sess = store.sessions[sid]
@@ -351,11 +457,6 @@ export default function useWebSocket() {
                 })
               }
             }
-            break
-          }
-
-          case 'task_update': {
-            useStore.getState().updateTaskInStore(data.task)
             break
           }
 
@@ -501,6 +602,27 @@ export default function useWebSocket() {
             break
           }
 
+          case 'account_switched': {
+            // Auto auth cycling: backend already switched the account and
+            // stopped the PTY.  Show a notification and auto-restart.
+            const store = useStore.getState()
+            const session = store.sessions[sid]
+            store.addNotification({
+              sessionId: sid,
+              type: 'info',
+              message: `Auto-cycled ${session?.name || sid.slice(0, 8)}: ${data.old_account_name} → ${data.new_account_name}`,
+            })
+            const writer = terminalWriters.get(sid)
+            if (writer) {
+              writer(`\r\n\x1b[33m[auth cycled: ${data.old_account_name} → ${data.new_account_name} — restarting…]\x1b[0m\r\n`)
+            }
+            // Auto-restart after a brief delay to let the PTY fully exit
+            setTimeout(() => {
+              useStore.getState().restartSession(sid)
+            }, 1500)
+            break
+          }
+
           case 'context_low': {
             // Pre-warning: Claude Code's status line says context is low.
             // Drives the same indicator as the compaction hooks but with
@@ -573,10 +695,6 @@ export default function useWebSocket() {
             break
           }
 
-          case 'pipeline_run_update': {
-            if (data.run) useStore.getState().handlePipelineRunUpdate(data.run)
-            break
-          }
         }
       }
 

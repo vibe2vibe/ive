@@ -27,8 +27,8 @@ SKILL_REPOS = [
 ]
 
 # Baked-in community catalog
-from resource_path import backend_dir
-_CATALOG_PATH = str(backend_dir() / "skills_catalog.json")
+from resource_path import backend_dir, project_root, is_frozen
+_CATALOG_PATH = str((project_root() if is_frozen() else backend_dir()) / "skills_catalog.json")
 _catalog_cache = None
 
 # In-memory caches with TTL

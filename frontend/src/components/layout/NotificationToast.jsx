@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Shield, Check, X, MessageSquare, FileText, RotateCcw, Sparkles, Server, Zap } from 'lucide-react'
+import { Shield, Check, X, MessageSquare, FileText, RotateCcw, Sparkles, Server, Zap, AlertTriangle, GitBranch, Brain } from 'lucide-react'
 import useStore from '../../state/store'
 import { sendTerminalCommand, typeInTerminal, sendPlanChoice } from '../../lib/terminal'
 import { clearPromptBuffer } from '../../lib/outputParser'
@@ -385,6 +385,53 @@ function Toast({ notif }) {
     )
   }
 
+  if (notif.type === 'skill_suggestion') {
+    const skills = notif.skills || []
+    const indexBuilding = notif.indexBuilding
+    const handleOpenSkills = () => {
+      window.dispatchEvent(new CustomEvent('open-marketplace', { detail: { tab: 'skills' } }))
+      dismiss()
+    }
+    return (
+      <div className="bg-[#161622] border border-amber-500/30 rounded-lg shadow-2xl overflow-hidden animate-in slide-in-from-right">
+        <div className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-500/10 border-b border-amber-500/20">
+          <Zap size={12} className="text-amber-400" />
+          <span className="text-[11px] font-mono text-amber-300 flex-1 truncate">
+            {skills.length} skill{skills.length !== 1 ? 's' : ''} suggested
+          </span>
+          {indexBuilding && (
+            <span title="Skill index is still building — results are keyword-based. Semantic matching will be available shortly.">
+              <AlertTriangle size={12} className="text-yellow-500" />
+            </span>
+          )}
+          <button onClick={dismiss} className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors">
+            <X size={12} />
+          </button>
+        </div>
+        <div className="px-2.5 py-1.5 space-y-0.5">
+          {skills.slice(0, 3).map((s, i) => (
+            <p key={i} className="text-[11px] font-mono text-zinc-400 leading-relaxed truncate">
+              <span className="text-amber-300">{s.name}</span>
+              {s.description ? ` — ${s.description}` : ''}
+            </p>
+          ))}
+        </div>
+        <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-t border-zinc-800">
+          <button
+            onClick={handleOpenSkills}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-mono bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 rounded transition-colors"
+          >
+            <Zap size={10} />
+            Browse Skills
+          </button>
+          <button onClick={dismiss} className="ml-auto text-[11px] font-mono text-zinc-500 hover:text-zinc-300 px-2 py-1.5 rounded hover:bg-zinc-800 transition-colors">
+            later
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   if (notif.type === 'distill_done') {
     const handleOpenDistill = () => {
       window.dispatchEvent(new CustomEvent('open-distill-result', { detail: { result: notif.result, artifactType: notif.artifactType } }))
@@ -475,6 +522,67 @@ function Toast({ notif }) {
         </div>
         <div className="px-2.5 py-1.5">
           <p className="text-[11px] font-mono text-red-300/80 leading-relaxed line-clamp-3">{notif.message}</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (notif.type === 'branch_created') {
+    return (
+      <div className="bg-[#161622] border border-purple-500/30 rounded-lg shadow-2xl overflow-hidden animate-in slide-in-from-right">
+        <div className="flex items-center gap-1 px-2.5 py-1.5 bg-purple-500/10 border-b border-purple-500/20">
+          <GitBranch size={12} className="text-purple-400" />
+          <span className="text-[11px] font-mono text-purple-300 flex-1 truncate">Branch Detected</span>
+          <button onClick={dismiss} className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors">
+            <X size={12} />
+          </button>
+        </div>
+        <div className="px-2.5 py-1.5">
+          <p className="text-[11px] font-mono text-zinc-300 leading-relaxed">{notif.message}</p>
+        </div>
+        <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-t border-zinc-800">
+          <button
+            onClick={handleFocus}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-mono bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 rounded transition-colors"
+          >
+            <MessageSquare size={10} />
+            View Session
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (notif.type === 'memory_sync_conflict') {
+    const handleResolve = () => {
+      window.dispatchEvent(new CustomEvent('open-memory-conflict', {
+        detail: { workspaceId: notif.workspaceId }
+      }))
+      dismiss()
+    }
+    return (
+      <div className="bg-[#161622] border border-red-500/30 rounded-lg shadow-2xl overflow-hidden animate-in slide-in-from-right">
+        <div className="flex items-center gap-1 px-2.5 py-1.5 bg-red-500/10 border-b border-red-500/20">
+          <Brain size={12} className="text-red-400" />
+          <span className="text-[11px] font-mono text-red-300 flex-1 truncate">Memory Sync Conflict</span>
+          <button onClick={dismiss} className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors">
+            <X size={12} />
+          </button>
+        </div>
+        <div className="px-2.5 py-1.5">
+          <p className="text-[11px] font-mono text-zinc-300 leading-relaxed">{notif.message}</p>
+        </div>
+        <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-t border-zinc-800">
+          <button
+            onClick={handleResolve}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-mono bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/30 rounded transition-colors"
+          >
+            <Brain size={10} />
+            Resolve
+          </button>
+          <button onClick={dismiss} className="ml-auto text-[11px] font-mono text-zinc-500 hover:text-zinc-300 px-2 py-1.5 rounded hover:bg-zinc-800 transition-colors">
+            later
+          </button>
         </div>
       </div>
     )

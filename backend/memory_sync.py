@@ -40,6 +40,14 @@ from cli_profiles import PROFILES, CLIProfile
 
 logger = logging.getLogger(__name__)
 
+# Default values for workspace_memory.settings JSON. Merged in get_settings()
+# so every caller (API, internal sync, PTY start) sees the same defaults.
+SETTINGS_DEFAULTS = {
+    "enabled": True,
+    "auto_sync": True,
+    "memory_max_chars": 4000,
+}
+
 
 # ─── Data types ──────────────────────────────────────────────────────
 
@@ -360,6 +368,12 @@ class MemorySyncManager:
 
     def __init__(self):
         self._debounce_tasks: dict[str, asyncio.Task] = {}
+        self._workspace_locks: dict[str, asyncio.Lock] = {}
+
+    def _get_lock(self, workspace_id: str) -> asyncio.Lock:
+        if workspace_id not in self._workspace_locks:
+            self._workspace_locks[workspace_id] = asyncio.Lock()
+        return self._workspace_locks[workspace_id]
 
     # ── DB helpers ───────────────────────────────────────────────────
 
@@ -429,6 +443,16 @@ class MemorySyncManager:
         If *source_cli* is set, that provider is treated as authoritative
         (e.g. after a session ends we know which CLI might have changed).
         """
+        async with self._get_lock(workspace_id):
+            return await self._sync_inner(workspace_id, workspace_path, scope, source_cli)
+
+    async def _sync_inner(
+        self,
+        workspace_id: str,
+        workspace_path: str,
+        scope: str = "project",
+        source_cli: Optional[str] = None,
+    ) -> SyncResult:
         record = await self._get_or_create(workspace_id, scope)
         central = record["content"] or ""
         stored = json.loads(record.get("provider_hashes", "{}"))
@@ -557,7 +581,7 @@ class MemorySyncManager:
         record = await self._get_or_create(workspace_id, scope)
         central = record["content"] or ""
         stored = json.loads(record.get("provider_hashes", "{}"))
-        settings = json.loads(record.get("settings", "{}"))
+        settings = {**SETTINGS_DEFAULTS, **json.loads(record.get("settings", "{}"))}
 
         providers: dict[str, dict] = {}
         for prov in all_providers():
@@ -575,8 +599,8 @@ class MemorySyncManager:
             }
 
         return SyncStatus(
-            enabled=settings.get("enabled", False),
-            auto_sync=settings.get("auto_sync", False),
+            enabled=settings["enabled"],
+            auto_sync=settings["auto_sync"],
             last_synced_at=record.get("last_synced_at"),
             central_content_length=len(central),
             providers=providers,
@@ -599,7 +623,8 @@ class MemorySyncManager:
 
     async def get_settings(self, workspace_id: str, scope: str = "project") -> dict:
         record = await self._get_or_create(workspace_id, scope)
-        return json.loads(record.get("settings", "{}"))
+        raw = json.loads(record.get("settings", "{}"))
+        return {**SETTINGS_DEFAULTS, **raw}
 
     async def update_settings(self, workspace_id: str, settings: dict,
                               scope: str = "project") -> dict:
@@ -826,7 +851,7 @@ async def on_memory_file_changed(
             await db.close()
 
     settings = await sync_manager.get_settings(workspace_id)
-    if not settings.get("enabled") or not settings.get("auto_sync"):
+    if not settings["enabled"] or not settings["auto_sync"]:
         return
 
     source_cli = None

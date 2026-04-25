@@ -12,7 +12,9 @@ from pathlib import Path
 
 def is_frozen() -> bool:
     """True when running from a PyInstaller or Nuitka compiled binary."""
-    return getattr(sys, "frozen", False)
+    # Note: dir() returns local scope only — use globals() to see module-level
+    # __compiled__ that Nuitka injects into every compiled module.
+    return getattr(sys, "frozen", False) or "__compiled__" in globals()
 
 
 def backend_dir() -> Path:
@@ -30,8 +32,11 @@ def project_root() -> Path:
     """Project root directory (one level above backend/ in source mode).
 
     Source mode:  /path/to/ive/
-    Frozen mode:  /path/to/dist/ive/  (executable's directory)
+    Frozen mode:  IVE_ROOT env var if set, else the executable's directory.
     """
+    env = os.environ.get("IVE_ROOT")
+    if env:
+        return Path(env)
     if is_frozen():
         return Path(sys.executable).parent
     return Path(os.path.dirname(os.path.abspath(__file__))).parent

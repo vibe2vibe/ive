@@ -4,7 +4,7 @@ import {
   Search, Copy, Download, Layout, LayoutGrid, History, Inbox, ListChecks,
   Kanban, GitBranch, GitCompareArrows, Crown, StickyNote, User, RotateCcw, Globe, Package,
   FlaskConical, Zap, Volume2, MessageSquareQuote, ListOrdered, Server, Sparkles,
-  Brain, MessagesSquare, ExternalLink, BookOpenCheck
+  Brain, MessagesSquare, ExternalLink, BookOpenCheck, Key, Telescope
 } from 'lucide-react'
 
 export const ACTIONS = [
@@ -32,6 +32,7 @@ export const ACTIONS = [
   { id: 'feature-board', label: 'Feature Board', icon: Kanban, section: 'Orchestration', shortcut: '⌘B' },
   { id: 'pipeline-editor', label: 'Pipeline Editor', icon: GitCompareArrows, section: 'Orchestration', shortcut: '⌘⇧L' },
   { id: 'quick-feature', label: 'Quick Feature', icon: Zap, section: 'Orchestration', shortcut: '⌘⇧N' },
+  { id: 'observatory', label: 'Research Hub — Feed', icon: Telescope, section: 'Research', shortcut: '⌘⇧O' },
   { id: 'agent-tree', label: 'Agent Tree', icon: GitBranch, section: 'Orchestration', shortcut: '⌘T' },
   { id: 'start-commander', label: 'Start Commander', icon: Crown, section: 'Orchestration' },
   { id: 'start-documentor', label: 'Start Documentor', icon: BookOpenCheck, section: 'Orchestration' },
@@ -42,7 +43,7 @@ export const ACTIONS = [
   { id: 'grid-layout-editor', label: 'Edit Grid Layout', icon: LayoutGrid, section: 'View', gridOnly: true },
   { id: 'accounts', label: 'Manage Accounts', icon: User, section: 'Auth' },
   { id: 'config-viewer', label: 'Config Files & Tool Permissions', icon: Shield, section: 'Config' },
-  { id: 'research', label: 'Research DB', icon: Globe, section: 'Research', shortcut: '⌘R' },
+  { id: 'research', label: 'Research Hub — Library', icon: BookOpen, section: 'Research', shortcut: '⌘R' },
   { id: 'marketplace', label: 'Plugins & Skills', icon: Package, section: 'Config', shortcut: '⌘⇧M' },
   { id: 'quick-actions', label: 'Quick Action Palette', icon: Zap, section: 'Navigation', shortcut: '⌘Y' },
   { id: 'skills-library', label: 'Agent Skills Library', icon: Zap, section: 'Config', shortcut: '⌘O' },
@@ -51,6 +52,7 @@ export const ACTIONS = [
   { id: 'cascades', label: 'Prompt Cascades', icon: ListOrdered, section: 'Prompts' },
   { id: 'general-settings', label: 'General Settings', icon: ToggleLeft, section: 'Config' },
   { id: 'sound-settings', label: 'Sound Notifications', icon: Volume2, section: 'Config' },
+  { id: 'api-keys', label: 'API Keys', icon: Key, section: 'Config' },
   { id: 'code-review', label: 'Code Review', icon: GitCompareArrows, section: 'Git', shortcut: '⌘⇧G' },
   { id: 'annotate', label: 'Annotate Output', icon: MessageSquareQuote, section: 'Sessions', shortcut: '⌘⇧A' },
   { id: 'memory-search', label: 'Memory Search', icon: Brain, section: 'W2W' },

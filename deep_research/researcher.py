@@ -50,34 +50,75 @@ class DeepResearcher:
         self.llm = llm or LLMClient(self.config)
         self.search = search or build_search(self.config)
         self.progress = on_progress or (lambda msg: print(msg))
+        self._steer_queue: asyncio.Queue | None = None  # injected queries
+
+    def set_steer_queue(self, queue: asyncio.Queue):
+        """Set a queue for receiving injected sub-queries during research."""
+        self._steer_queue = queue
+
+    # ── Structured progress helper ──────────────────────────────
+
+    def _emit(self, phase: str, detail: str, **extra):
+        """Emit a structured progress event + human-readable line."""
+        event = {"phase": phase, "detail": detail, **extra}
+        # Default callback is print() — output JSON for machine parsing
+        if self.progress is print:
+            import json as _json
+            self.progress(_json.dumps(event))
+        else:
+            try:
+                self.progress(event)
+            except TypeError:
+                self.progress(detail)
 
     # ── Public API ─────────────────────────────────────────────────
 
+    async def decompose_only(self, query: str) -> dict:
+        """Run Phase 1 only — return the research plan without executing.
+
+        Returns dict with: sub_queries, reformulations, cross_domain_queries,
+        key_entities. The caller can modify this and pass it to research_with_plan().
+        """
+        return await self._decompose(query)
+
+    async def research_with_plan(self, query: str, plan: dict) -> str:
+        """Run research using a pre-built/modified plan (skip decomposition)."""
+        return await self._run(query, plan=plan)
+
     async def research(self, query: str) -> str:
         """Run a full deep research session. Returns the final report markdown."""
+        return await self._run(query, plan=None)
+
+    async def _run(self, query: str, plan: dict | None = None) -> str:
+        """Core research loop. If plan is provided, skip decomposition."""
         start = time.time()
         deadline = start + self.config.time_limit_minutes * 60
         topic_slug = _slugify(query)
         out_dir = Path(self.config.output_dir) / topic_slug
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        self.progress(
+        self._emit("init", (
             f"Model: {self.config.llm_model} @ {self.config.llm_base_url}\n"
             f"Search: {', '.join(self.search.active_names)}\n"
-            f"Time limit: {self.config.time_limit_minutes} minutes\n"
-        )
+            f"Time limit: {self.config.time_limit_minutes} minutes"
+        ), elapsed=0)
 
-        # ── Phase 1: Decompose ─────────────────────────────────────
-        self.progress("[1] Decomposing query...")
-        decomposition = await self._decompose(query)
+        # ── Phase 1: Decompose (or use provided plan) ─────────────
+        if plan:
+            self._emit("decompose", "Using provided research plan", elapsed=int(time.time() - start))
+            decomposition = plan
+        else:
+            self._emit("decompose", "Decomposing query...", elapsed=int(time.time() - start))
+            decomposition = await self._decompose(query)
+
         sub_qs = decomposition.get("sub_queries", [query])
         reformulations = decomposition.get("reformulations", [])
         cross_qs = decomposition.get("cross_domain_queries", [])
         entities = decomposition.get("key_entities", [])
-        self.progress(
-            f"    {len(sub_qs)} sub-queries, {len(reformulations)} reformulations, "
+        self._emit("decompose", (
+            f"{len(sub_qs)} sub-queries, {len(reformulations)} reformulations, "
             f"{len(cross_qs)} cross-domain, {len(entities)} key entities"
-        )
+        ), sub_queries=len(sub_qs), elapsed=int(time.time() - start))
 
         # ── Phase 2: Iterative research loop ───────────────────────
         findings: list[dict] = []         # {title, url, source, content, round}
@@ -89,10 +130,25 @@ class DeepResearcher:
             iteration += 1
             elapsed = int(time.time() - start)
             remaining = int((deadline - time.time()) / 60)
-            self.progress(
-                f"\n[Round {iteration}/{self.config.max_iterations}] "
+            self._emit("search", (
+                f"Round {iteration}/{self.config.max_iterations} "
                 f"({elapsed}s elapsed, ~{remaining}min left)"
-            )
+            ), round=iteration, total_rounds=self.config.max_iterations,
+               findings_count=len(findings), elapsed=elapsed)
+
+            # Drain steer queue — inject user-supplied sub-queries
+            if self._steer_queue:
+                while not self._steer_queue.empty():
+                    try:
+                        steered = self._steer_queue.get_nowait()
+                        if isinstance(steered, list):
+                            sub_qs.extend(steered)
+                        elif isinstance(steered, str):
+                            sub_qs.append(steered)
+                        self._emit("steer", f"Injected {len(steered) if isinstance(steered, list) else 1} steered queries",
+                                   round=iteration, elapsed=int(time.time() - start))
+                    except asyncio.QueueEmpty:
+                        break
 
             # Determine what to search — sub-queries + reformulations + cross-domain
             queries = list(sub_qs)
@@ -102,10 +158,12 @@ class DeepResearcher:
             queries = [q for q in queries if q not in searched_queries]
 
             if not queries:
-                self.progress("    No new queries to search — stopping")
+                self._emit("search", "No new queries to search — stopping",
+                           round=iteration, elapsed=int(time.time() - start))
                 break
 
-            self.progress(f"    Searching {len(queries)} queries...")
+            self._emit("search", f"Searching {len(queries)} queries...",
+                       round=iteration, query_count=len(queries), elapsed=int(time.time() - start))
             all_results = await self.search.search_many(
                 queries, self.config.max_results_per_source
             )
@@ -114,27 +172,33 @@ class DeepResearcher:
             # Deduplicate against already-fetched URLs
             known_urls = {f["url"] for f in findings}
             new_results = [r for r in all_results if r.url not in known_urls]
-            self.progress(f"    {len(new_results)} new unique results (RRF fused)")
+            self._emit("search", f"{len(new_results)} new unique results (RRF fused)",
+                       round=iteration, results_count=len(new_results), elapsed=int(time.time() - start))
 
             if not new_results:
-                self.progress("    No new results — stopping")
+                self._emit("search", "No new results — stopping",
+                           round=iteration, elapsed=int(time.time() - start))
                 break
 
             # Evaluate relevance
+            self._emit("evaluate", "Evaluating relevance...",
+                       round=iteration, elapsed=int(time.time() - start))
             top = await self._evaluate(query, new_results[:40])
-            self.progress(f"    {len(top)} results pass relevance filter")
+            self._emit("evaluate", f"{len(top)} results pass relevance filter",
+                       round=iteration, relevant_count=len(top), elapsed=int(time.time() - start))
 
             if not top:
-                self.progress("    No relevant results this round")
                 sub_qs = []
                 cross_qs = []
                 continue
 
             # Extract content
             fetch_urls = [r.url for r in top[: self.config.max_pages_to_fetch]]
-            self.progress(f"    Extracting content from {len(fetch_urls)} URLs...")
+            self._emit("extract", f"Extracting content from {len(fetch_urls)} URLs...",
+                       round=iteration, url_count=len(fetch_urls), elapsed=int(time.time() - start))
             contents = await extract_multiple(fetch_urls)
-            self.progress(f"    {len(contents)}/{len(fetch_urls)} extracted")
+            self._emit("extract", f"{len(contents)}/{len(fetch_urls)} extracted",
+                       round=iteration, extracted=len(contents), elapsed=int(time.time() - start))
 
             # Build findings
             new_count = 0
@@ -161,24 +225,28 @@ class DeepResearcher:
                     })
                     new_count += 1
 
-            self.progress(f"    +{new_count} findings (total: {len(findings)})")
+            self._emit("extract", f"+{new_count} findings (total: {len(findings)})",
+                       round=iteration, findings_count=len(findings), elapsed=int(time.time() - start))
 
             # Save scratchpad
             self._save_scratchpad(out_dir, query, findings, iteration)
 
             # Gap analysis
-            self.progress("    Analyzing gaps...")
+            self._emit("gaps", "Analyzing gaps...",
+                       round=iteration, elapsed=int(time.time() - start))
             gaps = await self._gap_analysis(query, findings, searched_queries)
             confidence = gaps.get("confidence", 0.0)
             should_continue = gaps.get("should_continue", True)
-            self.progress(
-                f"    Confidence: {confidence:.0%} | "
+            self._emit("gaps", (
+                f"Confidence: {confidence:.0%} | "
                 f"Continue: {should_continue} | "
                 f"Gaps: {len(gaps.get('gaps', []))}"
-            )
+            ), round=iteration, confidence=confidence,
+               gap_count=len(gaps.get("gaps", [])), elapsed=int(time.time() - start))
 
             if not should_continue:
-                self.progress("    Research sufficiently comprehensive — stopping")
+                self._emit("gaps", "Research sufficiently comprehensive — stopping",
+                           round=iteration, confidence=confidence, elapsed=int(time.time() - start))
                 break
 
             # Prepare next round — gaps feed new queries + reformulations
@@ -187,12 +255,15 @@ class DeepResearcher:
             cross_qs = gaps.get("cross_domain_suggestions", [])
 
         # ── Phase 3: Synthesize ────────────────────────────────────
-        self.progress(f"\n[Synthesis] Synthesizing {len(findings)} findings...")
+        self._emit("synthesize", f"Synthesizing {len(findings)} findings...",
+                   findings_count=len(findings), sources_count=len(source_index),
+                   elapsed=int(time.time() - start))
         report = await self._synthesize(query, findings, source_index)
 
         # ── Phase 4: Verify (optional) ─────────────────────────────
         if self.config.verify_claims and findings:
-            self.progress("[Verify] Cross-referencing key claims...")
+            self._emit("verify", "Cross-referencing key claims...",
+                       elapsed=int(time.time() - start))
             verification = await self._verify(report, findings)
             if verification:
                 report += "\n\n## Claim Verification\n\n" + verification
@@ -207,12 +278,11 @@ class DeepResearcher:
         )
 
         elapsed_total = int(time.time() - start)
-        self.progress(
-            f"\nResearch complete in {elapsed_total}s\n"
-            f"  {iteration} rounds, {len(findings)} sources consulted\n"
-            f"  Report: {report_path}\n"
-            f"  Scratchpad: {out_dir / 'scratchpad.md'}"
-        )
+        self._emit("done", (
+            f"Research complete in {elapsed_total}s — "
+            f"{iteration} rounds, {len(findings)} sources consulted"
+        ), rounds=iteration, findings_count=len(findings),
+           sources_count=len(source_index), elapsed=elapsed_total)
 
         return report
 

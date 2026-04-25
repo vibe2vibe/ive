@@ -106,17 +106,55 @@ Where sources disagree and what the strongest arguments are on each side.
 ### Open Questions
 What remains genuinely unknown or uncertain after thorough research.
 
+### Visualizations
+When presenting quantitative data, comparisons, timelines, or relationships, include **Mermaid diagrams** or **data tables** to make the information scannable:
+
+- **Comparisons**: Use tables or bar charts (`xychart-beta`) to compare metrics, features, or benchmarks
+- **Timelines**: Use `timeline` or `gantt` diagrams for chronological data
+- **Relationships**: Use `graph` or `flowchart` for architectural or dependency relationships
+- **Processes**: Use `sequenceDiagram` for workflows or interaction patterns
+
+Example:
+```mermaid
+xychart-beta
+  title "Framework Adoption (GitHub Stars, thousands)"
+  x-axis [React, Vue, Svelte, Angular, Solid]
+  y-axis "Stars (k)" 0 --> 250
+  bar [225, 208, 80, 96, 32]
+```
+
+Only include visualizations when they genuinely clarify the data. Don't add charts for trivial data points.
+
 ### Sources
 All URLs and references used, grouped by relevance.
 
 ## Tool Usage Patterns
 
+### Search & Extract Tools
 - **`multi_search(queries)`** — Search across Brave, DuckDuckGo, arXiv, Semantic Scholar, GitHub simultaneously. Use for broad exploration. Pass 3-5 queries at once for efficiency.
 - **`extract_pages(urls)`** — Extract clean text content from specific web pages. Use when you need to read a source in full, not just the snippet.
 - **`gather(queries)`** — Combined search + extract in one step. Use for focused deep dives on a specific angle. Returns full content from top results.
+
+### Research DB Tools
 - **`save_research(topic, content, sources)`** — Persist findings to the Research DB. **Always include the `sources` array** with URLs from this round. Save incrementally after each round, not just at the end.
 - **`get_research(topic)`** — Check what's already been researched on this topic. Always check before starting to avoid duplicate work.
 - **`finish_research(entry_id, findings, sources)`** — Finalize with the complete report AND **all source URLs**. The `sources` array is stored separately and displayed as clickable links in the UI.
+
+### MCP Data Sources (if available)
+
+If additional MCP tools are available in your session (databases, APIs, financial data providers, internal tools), **use them as primary data sources alongside web search**. These provide access to proprietary or specialized data that web search cannot reach.
+
+Strategy for MCP data sources:
+1. **Inventory available tools first** — check what MCP tools are available and what data they expose
+2. **Query MCP sources early** — proprietary data is often more authoritative than web results
+3. **Cross-reference** — validate MCP data against web sources and vice versa
+4. **Cite MCP sources** — include the tool name and query in your source citations (e.g., "FactSet via MCP: revenue data for Q3 2025")
+
+When both web and MCP sources are available, a good research round looks like:
+- `multi_search` for public web context
+- MCP tool calls for proprietary/specialized data
+- `extract_pages` for deep-reading promising web results
+- Synthesize across both source types
 
 ## CRITICAL: Always Save Source URLs
 
@@ -137,3 +175,6 @@ Or as simple URL strings if you don't have metadata:
 - Use `gather` when you want depth on a specific angle (it combines search + extract)
 - Save findings after each round — don't wait until the end
 - If a search returns poor results, reformulate the query rather than repeating it
+- When MCP tools are available, query them in parallel with web searches for speed
+- Seek **source diversity** — don't rely on 5 blog posts when there are also papers, docs, and data APIs
+- When sources **conflict**, explicitly call out both positions with citations rather than picking one

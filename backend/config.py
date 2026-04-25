@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from resource_path import backend_dir, project_root
+from resource_path import backend_dir, project_root, is_frozen
 
 VERSION = "1.0.0"
 
@@ -75,14 +75,22 @@ GEMINI_APPROVAL_MODES = GEMINI_PROFILE.available_permission_modes
 
 CLI_TYPES = [{"id": p.id, "label": p.label} for p in PROFILES.values()]
 
-# MCP Server
-MCP_SERVER_PATH = backend_dir() / "mcp_server.py"
-WORKER_MCP_SERVER_PATH = backend_dir() / "worker_mcp_server.py"
-DOCUMENTOR_MCP_SERVER_PATH = backend_dir() / "documentor_mcp_server.py"
-DEEP_RESEARCH_MCP_PATH = project_root() / "plugins" / "deep-research" / "mcp_server.py"
+# MCP Server — use compiled binaries in frozen mode, Python scripts in dev
+if is_frozen():
+    # Compiled MCP binaries live in IVE_ROOT/bin/, not in the Nuitka temp dir
+    _bin_dir = project_root() / "bin"
+    MCP_SERVER_PATH = _bin_dir / "ive-mcp-server"
+    WORKER_MCP_SERVER_PATH = _bin_dir / "ive-worker-mcp-server"
+    DOCUMENTOR_MCP_SERVER_PATH = _bin_dir / "ive-documentor-mcp-server"
+    DEEP_RESEARCH_MCP_PATH = _bin_dir / "ive-research-mcp"
+else:
+    MCP_SERVER_PATH = backend_dir() / "mcp_server.py"
+    WORKER_MCP_SERVER_PATH = backend_dir() / "worker_mcp_server.py"
+    DOCUMENTOR_MCP_SERVER_PATH = backend_dir() / "documentor_mcp_server.py"
+    DEEP_RESEARCH_MCP_PATH = project_root() / "plugins" / "deep-research" / "mcp_server.py"
 DEEP_RESEARCH_SKILL_PATH = project_root() / "plugins" / "deep-research" / "SKILL.md"
 MCP_CONFIG_DIR = DATA_DIR / "mcp_configs"
-MCP_CONFIG_TEMPLATE = backend_dir() / "mcp_config_template.json"
+MCP_CONFIG_TEMPLATE = project_root() / "mcp_config_template.json" if is_frozen() else backend_dir() / "mcp_config_template.json"
 
 # Rate Limiting (disabled — local app; re-enable if exposed to network)
 DEFAULT_RATE_LIMIT = (100, 60)

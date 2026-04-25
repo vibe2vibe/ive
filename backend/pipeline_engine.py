@@ -31,11 +31,12 @@ logger = logging.getLogger(__name__)
 _pty_manager = None
 _broadcast_fn = None
 
-# In-memory tracking for fast lookup
+# In-memory tracking for fast lookup — guarded by _state_lock
 _session_to_run: dict[str, str] = {}        # session_id → run_id
 _active_runs: dict[str, dict] = {}           # run_id → cached run state
 _advance_timers: dict[str, object] = {}      # session_id → TimerHandle
 _trigger_cooldowns: dict[str, float] = {}    # pipeline_id → last trigger time
+_state_lock = asyncio.Lock()                 # protects all dicts above
 
 ADVANCE_DELAY_S = 1.5
 DEFAULT_MAX_ITERATIONS = 20
@@ -79,9 +80,9 @@ async def create_definition(data: dict) -> dict:
                 data.get("name", "Untitled Pipeline"),
                 data.get("description", ""),
                 data.get("workspace_id"),
-                json.dumps(data.get("stages", [])),
-                json.dumps(data.get("transitions", [])),
-                json.dumps(data.get("triggers", [])),
+                json.dumps(data.get("stages") if isinstance(data.get("stages"), list) else []),
+                json.dumps(data.get("transitions") if isinstance(data.get("transitions"), list) else []),
+                json.dumps(data.get("triggers") if isinstance(data.get("triggers"), list) else []),
                 1 if data.get("preset") else 0,
                 data.get("preset_key"),
                 data.get("status", "draft"),
@@ -283,11 +284,11 @@ async def start_run(
         await db.close()
 
     run = await get_run(run_id)
-    _active_runs[run_id] = run
-
-    # Track task so auto_exec skips it while pipeline handles it
-    if task_id:
-        _pipeline_task_ids.add(task_id)
+    async with _state_lock:
+        _active_runs[run_id] = run
+        # Track task so auto_exec skips it while pipeline handles it
+        if task_id:
+            _pipeline_task_ids.add(task_id)
 
     await bus.emit(CommanderEvent.PIPELINE_STARTED, {
         "pipeline_id": pipeline_id,
@@ -320,7 +321,8 @@ async def pause_run(run_id: str) -> Optional[dict]:
     # Cancel any pending timers
     run = await get_run(run_id)
     if run:
-        _active_runs.pop(run_id, None)
+        async with _state_lock:
+            _active_runs.pop(run_id, None)
         await _broadcast_run(run)
     return run
 
@@ -339,7 +341,8 @@ async def resume_run(run_id: str) -> Optional[dict]:
     finally:
         await db.close()
     run = await get_run(run_id)
-    _active_runs[run_id] = run
+    async with _state_lock:
+        _active_runs[run_id] = run
 
     # Re-execute current stages that were pending/running
     stage_history = json.loads(run["stage_history"]) if isinstance(run["stage_history"], str) else run["stage_history"]
@@ -359,17 +362,18 @@ async def cancel_run(run_id: str) -> Optional[dict]:
         return None
     # Clean up timers, mappings, and task tracking
     stage_history = json.loads(run["stage_history"]) if isinstance(run["stage_history"], str) else run["stage_history"]
-    for sid, sh in stage_history.items():
-        sess = sh.get("session_id")
-        if sess:
-            _session_to_run.pop(sess, None)
-            timer = _advance_timers.pop(sess, None)
-            if timer:
-                timer.cancel()
-    _active_runs.pop(run_id, None)
-    task_id = run.get("task_id")
-    if task_id:
-        _pipeline_task_ids.discard(task_id)
+    async with _state_lock:
+        for sid, sh in stage_history.items():
+            sess = sh.get("session_id")
+            if sess:
+                _session_to_run.pop(sess, None)
+                timer = _advance_timers.pop(sess, None)
+                if timer:
+                    timer.cancel()
+        _active_runs.pop(run_id, None)
+        task_id = run.get("task_id")
+        if task_id:
+            _pipeline_task_ids.discard(task_id)
 
     db = await get_db()
     try:
@@ -482,6 +486,22 @@ async def _execute_agent_stage(
     agent_config = stage.get("agent_config") or {}
     ws_id = run.get("workspace_id")
 
+    # Session reuse: rerun in the same session as another stage
+    if not session_id:
+        reuse_from = stage.get("reuse_session_from")
+        if reuse_from == "__from_failure__":
+            session_id = _resolve_failure_session(defn, run, stage_id)
+            if session_id:
+                logger.info("Pipeline %s: stage '%s' reusing session from failure chain",
+                            run_id[:8], stage.get("name"))
+        elif reuse_from:
+            stage_history = run.get("stage_history", {})
+            sh = stage_history.get(reuse_from, {})
+            session_id = sh.get("session_id")
+            if session_id:
+                logger.info("Pipeline %s: stage '%s' reusing session from stage '%s'",
+                            run_id[:8], stage.get("name"), reuse_from)
+
     # Resolve session
     if not session_id and session_type:
         session_id = await _resolve_session(
@@ -496,7 +516,8 @@ async def _execute_agent_stage(
     await _update_stage_session(run_id, stage_id, session_id)
 
     # Map session → run for idle detection
-    _session_to_run[session_id] = run_id
+    async with _state_lock:
+        _session_to_run[session_id] = run_id
 
     # Build prompt from template
     prompt = _build_prompt(stage, run)
@@ -504,6 +525,21 @@ async def _execute_agent_stage(
         logger.warning("Empty prompt for stage '%s', advancing", stage.get("name"))
         await _complete_stage(run_id, stage_id)
         return
+
+    # Inject failure context: when this stage was reached via an on_fail
+    # transition, append the failing stage's output so the agent knows
+    # exactly what went wrong and what to fix.
+    transitions = defn.get("transitions", [])
+    stage_history = run.get("stage_history", {})
+    incoming_fail = [t for t in transitions
+                     if t["target"] == stage_id and t.get("condition") == "on_fail"]
+    for t in incoming_fail:
+        src_hist = stage_history.get(t["source"], {})
+        src_output = src_hist.get("output_summary", "")
+        if src_output:
+            src_stage = _find_stage(defn, t["source"])
+            src_name = src_stage.get("name", t["source"]) if src_stage else t["source"]
+            prompt += f"\n\n--- Failure from '{src_name}' ---\n{src_output}"
 
     # Send to PTY
     if not _pty_manager:
@@ -631,18 +667,19 @@ async def on_session_idle(session_id: str):
     Finds the active pipeline run waiting on this session and
     schedules stage completion after a debounce delay.
     """
-    run_id = _session_to_run.get(session_id)
-    if not run_id:
-        return
-
-    # Cancel any pending timer
-    timer = _advance_timers.pop(session_id, None)
-    if timer:
-        timer.cancel()
+    async with _state_lock:
+        run_id = _session_to_run.get(session_id)
+        if not run_id:
+            return
+        # Cancel any pending timer
+        timer = _advance_timers.pop(session_id, None)
+        if timer:
+            timer.cancel()
 
     run = await get_run(run_id)
     if not run or run["status"] != "running":
-        _session_to_run.pop(session_id, None)
+        async with _state_lock:
+            _session_to_run.pop(session_id, None)
         return
 
     # Find the stage that uses this session
@@ -789,18 +826,18 @@ async def _complete_run(run_id: str, status: str = "completed"):
         await db.close()
 
     run = await get_run(run_id)
-    _active_runs.pop(run_id, None)
-
-    # Clean up session mappings and task tracking
-    if run:
-        stage_history = run.get("stage_history", {})
-        for sh in stage_history.values():
-            sess = sh.get("session_id")
-            if sess:
-                _session_to_run.pop(sess, None)
-        task_id = run.get("task_id")
-        if task_id:
-            _pipeline_task_ids.discard(task_id)
+    async with _state_lock:
+        _active_runs.pop(run_id, None)
+        # Clean up session mappings and task tracking
+        if run:
+            stage_history = run.get("stage_history", {})
+            for sh in stage_history.values():
+                sess = sh.get("session_id")
+                if sess:
+                    _session_to_run.pop(sess, None)
+            task_id = run.get("task_id")
+            if task_id:
+                _pipeline_task_ids.discard(task_id)
 
     logger.info("Pipeline run %s %s (iteration %d)",
                 run_id[:8], status, run.get("iteration", 1) if run else 0)
@@ -831,7 +868,8 @@ async def _fail_stage(run_id: str, stage_id: str, error: str):
     finally:
         await db.close()
     run = await get_run(run_id)
-    _active_runs.pop(run_id, None)
+    async with _state_lock:
+        _active_runs.pop(run_id, None)
     await _broadcast_run(run)
 
 
@@ -920,13 +958,21 @@ async def _increment_iteration(run_id: str, reset_stage_ids: list[str], defn: di
                     stages_to_reset.add(t["target"])
                     queue.append(t["target"])
 
+        # Identify stages that dynamically resolve sessions (reuse_session_from)
+        # so we clear their session on reset instead of preserving it
+        dynamic_session_stages = set()
+        for s in defn.get("stages", []):
+            if s.get("reuse_session_from"):
+                dynamic_session_stages.add(s["id"])
+
         for sid in stages_to_reset:
             if sid in history:
                 history[sid] = {
                     "status": "pending",
                     "started_at": None,
                     "completed_at": None,
-                    "session_id": history[sid].get("session_id"),  # keep session assignment
+                    # Keep session for static stages, clear for dynamic (reuse_session_from)
+                    "session_id": None if sid in dynamic_session_stages else history[sid].get("session_id"),
                     "output_summary": None,
                 }
 
@@ -1077,6 +1123,50 @@ def _build_prompt(stage: dict, run: dict) -> str:
         key = m.group(1)
         return str(variables.get(key, m.group(0)))
     return re.sub(r'\{([a-zA-Z_]\w*)\}', replacer, template)
+
+
+def _resolve_failure_session(defn: dict, run: dict, stage_id: str) -> Optional[str]:
+    """Find the session from the stage that triggered this one via on_fail.
+
+    Traces backwards through the graph from the on_fail source (often a
+    condition node with no session) until it finds the nearest agent stage
+    that has a session_id in stage_history.
+    """
+    transitions = defn.get("transitions", [])
+    stage_history = run.get("stage_history", {})
+
+    incoming_fail = [t for t in transitions
+                     if t["target"] == stage_id and t.get("condition") == "on_fail"]
+
+    for t in incoming_fail:
+        source_id = t["source"]
+        src_hist = stage_history.get(source_id, {})
+        # Only follow paths where the source actually completed (i.e. this
+        # on_fail edge was the one that fired, not a stale previous iteration)
+        if src_hist.get("status") != "completed":
+            continue
+
+        # If the source itself has a session, use it
+        if src_hist.get("session_id"):
+            return src_hist["session_id"]
+
+        # Otherwise BFS backwards to find the nearest stage with a session
+        visited = {source_id}
+        queue = [source_id]
+        while queue:
+            current = queue.pop(0)
+            incoming = [t2 for t2 in transitions if t2["target"] == current]
+            for t2 in incoming:
+                pred_id = t2["source"]
+                if pred_id in visited:
+                    continue
+                visited.add(pred_id)
+                pred_hist = stage_history.get(pred_id, {})
+                if pred_hist.get("session_id"):
+                    return pred_hist["session_id"]
+                queue.append(pred_id)
+
+    return None
 
 
 def _find_stage(defn: dict, stage_id: str) -> Optional[dict]:
@@ -1313,6 +1403,97 @@ PRESETS = {
         ],
         "triggers": [],
     },
+    "verification-cascade": {
+        "name": "Verification Cascade",
+        "description": "Unit Tests -> E2E Tests -> Quality Audit, with fix-and-restart at every level. Escalating verification that checks if outputs are actually useful, not just working.",
+        "stages": [
+            {
+                "id": "unit_test", "name": "Unit Tests", "type": "agent",
+                "session_type": "tester",
+                "prompt_template": (
+                    "Run unit tests for {topic}. Use pytest or the project's test framework. "
+                    "If relevant tests don't exist yet, write them first — cover core logic, edge cases, and gating conditions. "
+                    "When done, use the report_pipeline_result tool with status 'pass' if all tests pass, or 'fail' with the failure summary."
+                ),
+                "position": {"x": 100, "y": 150}, "config": {"icon": "test-tubes"},
+                "agent_config": {"model": "sonnet", "permission_mode": "auto", "effort": "high"},
+            },
+            {
+                "id": "unit_eval", "name": "Unit Gate", "type": "condition",
+                "session_type": None, "prompt_template": "",
+                "position": {"x": 280, "y": 150},
+                "config": {"mode": "keyword", "icon": "git-branch",
+                           "pass_keywords": ["pass", "passed", "success", "all tests"],
+                           "fail_keywords": ["fail", "failed", "error", "broken"]},
+            },
+            {
+                "id": "e2e_test", "name": "E2E Tests", "type": "agent",
+                "session_type": "tester",
+                "prompt_template": (
+                    "Test {topic} end-to-end against the running system. Hit real API endpoints, start real sessions, "
+                    "verify WebSocket events arrive, check database state. Don't mock — test actual behavior. "
+                    "Verify the feature behaves as intended, not just that it doesn't crash. "
+                    "When done, use the report_pipeline_result tool with 'pass' or 'fail' and a behavioral summary."
+                ),
+                "position": {"x": 460, "y": 150}, "config": {"icon": "monitor"},
+                "agent_config": {"model": "sonnet", "permission_mode": "auto", "effort": "high"},
+            },
+            {
+                "id": "e2e_eval", "name": "E2E Gate", "type": "condition",
+                "session_type": None, "prompt_template": "",
+                "position": {"x": 640, "y": 150},
+                "config": {"mode": "keyword", "icon": "git-branch",
+                           "pass_keywords": ["pass", "passed", "success", "verified"],
+                           "fail_keywords": ["fail", "failed", "error", "broken", "unexpected"]},
+            },
+            {
+                "id": "quality_audit", "name": "Quality Audit", "type": "agent",
+                "session_type": "commander",
+                "prompt_template": (
+                    "Audit the output quality of {topic}. This is NOT a correctness check — the previous stages already verified that. "
+                    "Your job: run the feature with realistic inputs and evaluate whether the outputs are actually USEFUL to a human user. "
+                    "Check: Are generated texts meaningful and relevant? Are suggestions actionable? Do edge cases produce reasonable results or garbage? "
+                    "Test with at least 3 different realistic scenarios. Compare outputs against what a good human-crafted version would look like. "
+                    "Report 'pass' via report_pipeline_result only if outputs are production-quality. "
+                    "Report 'fail' with specific examples of low-quality output and what 'good' would look like."
+                ),
+                "position": {"x": 820, "y": 150}, "config": {"icon": "eye"},
+                "agent_config": {"model": "opus", "permission_mode": "plan", "effort": "high"},
+            },
+            {
+                "id": "quality_eval", "name": "Quality Gate", "type": "condition",
+                "session_type": None, "prompt_template": "",
+                "position": {"x": 1000, "y": 150},
+                "config": {"mode": "keyword", "icon": "git-branch",
+                           "pass_keywords": ["pass", "production-quality", "approved", "useful"],
+                           "fail_keywords": ["fail", "low-quality", "garbage", "misleading", "wrong"]},
+            },
+            {
+                "id": "fix", "name": "Fix", "type": "agent",
+                "session_type": "worker",
+                "reuse_session_from": "__from_failure__",
+                "prompt_template": (
+                    "Fix the issues found during verification of {topic}. Address the root cause, not just symptoms. "
+                    "If the quality audit flagged misleading outputs, fix the data/context the feature uses, not just the formatting. "
+                    "If unit or e2e tests failed, fix the code and update tests if needed."
+                ),
+                "position": {"x": 550, "y": 350}, "config": {"icon": "wrench"},
+                "agent_config": {"model": "sonnet", "permission_mode": "auto", "effort": "high"},
+            },
+        ],
+        "transitions": [
+            {"id": "t1", "source": "unit_test", "target": "unit_eval", "condition": "always", "label": ""},
+            {"id": "t2", "source": "unit_eval", "target": "e2e_test", "condition": "on_pass", "label": "Tests pass", "condition_config": {}},
+            {"id": "t3", "source": "unit_eval", "target": "fix", "condition": "on_fail", "label": "Tests fail", "condition_config": {}},
+            {"id": "t4", "source": "e2e_test", "target": "e2e_eval", "condition": "always", "label": ""},
+            {"id": "t5", "source": "e2e_eval", "target": "quality_audit", "condition": "on_pass", "label": "Behavior OK", "condition_config": {}},
+            {"id": "t6", "source": "e2e_eval", "target": "fix", "condition": "on_fail", "label": "Behavior wrong", "condition_config": {}},
+            {"id": "t7", "source": "quality_audit", "target": "quality_eval", "condition": "always", "label": ""},
+            {"id": "t8", "source": "quality_eval", "target": "fix", "condition": "on_fail", "label": "Quality issues", "condition_config": {}},
+            {"id": "t9", "source": "fix", "target": "unit_test", "condition": "always", "label": "Re-verify from start"},
+        ],
+        "triggers": [],
+    },
     "ralph-pipeline": {
         "name": "RALPH Pipeline",
         "description": "Execute -> Verify -> Fix -> Repeat. Multi-agent version of RALPH mode.",
@@ -1339,7 +1520,9 @@ PRESETS = {
             },
             {
                 "id": "fix", "name": "Fix", "type": "agent",
-                "session_type": "worker", "prompt_template": "Fix the issues found during verification. Apply the feedback.",
+                "session_type": "worker",
+                "reuse_session_from": "execute",
+                "prompt_template": "Fix the issues found during verification. Apply the feedback.",
                 "position": {"x": 600, "y": 380}, "config": {"icon": "wrench"},
                 "agent_config": {"model": "sonnet", "permission_mode": "auto", "effort": "high"},
             },

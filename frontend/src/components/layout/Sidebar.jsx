@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { Plus, FolderOpen, MessageSquare, ChevronDown, ChevronRight, Trash2, Search, Crown, Kanban, GitCompareArrows, GripVertical, Shield, Server, Check, GitMerge, FlaskConical, BookOpenCheck, FileText, Pencil, Copy, ClipboardCopy, Square, ExternalLink, Download } from 'lucide-react'
+import { Plus, FolderOpen, MessageSquare, ChevronDown, ChevronRight, Trash2, Search, Crown, Kanban, GitCompareArrows, GripVertical, Shield, Server, Check, GitMerge, FlaskConical, BookOpenCheck, FileText, Pencil, Copy, ClipboardCopy, Square, ExternalLink, Download, Telescope, Archive, ArchiveRestore, Sparkles } from 'lucide-react'
 import MergeDialog from '../session/MergeDialog'
 import useStore from '../../state/store'
 import { api } from '../../lib/api'
@@ -78,6 +78,21 @@ function SessionContextMenu({ x, y, session, onClose }) {
     onClose()
   }
 
+  const handleArchive = async () => {
+    const next = session.archived ? 0 : 1
+    await api.updateSession(session.id, { archived: next })
+    useStore.getState().setSessionArchived(session.id, next)
+    onClose()
+  }
+
+  const handleSummarize = async () => {
+    try {
+      const res = await api.summarizeSession(session.id)
+      if (res.summary) useStore.getState().setSessionSummary(session.id, res.summary)
+    } catch { /* silent */ }
+    onClose()
+  }
+
   const isRunning = session.status === 'running'
 
   const items = [
@@ -88,6 +103,9 @@ function SessionContextMenu({ x, y, session, onClose }) {
     { icon: Copy, label: 'Copy last message', action: handleCopyMessages },
     { icon: Download, label: 'Export', action: handleExport },
     null,
+    { icon: Sparkles, label: session.summary ? 'Re-summarize' : 'Summarize', action: handleSummarize },
+    { icon: session.archived ? ArchiveRestore : Archive, label: session.archived ? 'Unarchive' : 'Archive', action: handleArchive },
+    null,
     ...(isRunning ? [{ icon: Square, label: 'Stop', action: handleStop }] : []),
     { icon: Trash2, label: 'Delete', action: handleDelete, danger: true },
   ]
@@ -95,10 +113,15 @@ function SessionContextMenu({ x, y, session, onClose }) {
   return (
     <div
       ref={menuRef}
-      className="fixed z-[60] ide-panel py-1 min-w-[170px] scale-in"
+      className="fixed z-[60] ide-panel py-1 min-w-[170px] max-w-[280px] scale-in"
       style={pos}
       onClick={(e) => e.stopPropagation()}
     >
+      {session.summary && (
+        <div className="px-3 py-2 text-[10px] text-text-faint italic border-b border-border-secondary leading-relaxed">
+          {session.summary}
+        </div>
+      )}
       {items.map((item, i) =>
         item === null ? (
           <div key={`sep-${i}`} className="my-1 border-t border-border-secondary" />
@@ -775,6 +798,8 @@ export default function Sidebar() {
   const selectionWorkspaceId = useStore((s) => s.selectionWorkspaceId)
   const toggleSessionSelect = useStore((s) => s.toggleSessionSelect)
   const clearSessionSelection = useStore((s) => s.clearSessionSelection)
+  const peers = useStore((s) => s.peers)
+  const myClientId = useStore((s) => s.myClientId)
   const [showMergeDialog, setShowMergeDialog] = useState(false)
   const [now, setNow] = useState(Date.now())
   const [appVersion] = useState(() => localStorage.getItem('cc-version') || '')
@@ -927,10 +952,22 @@ export default function Sidebar() {
   const workspaceSessions = (wsId) => {
     const list = Object.values(sessions).filter((s) =>
       s.workspace_id === wsId &&
+      !s.archived &&
       (!filter || s.name.toLowerCase().includes(filter.toLowerCase()) || (s.model || '').toLowerCase().includes(filter.toLowerCase()))
     )
     return sortedByOrderIndex(list)
   }
+
+  const archivedSessions = (wsId) => {
+    const list = Object.values(sessions).filter((s) =>
+      s.workspace_id === wsId &&
+      s.archived &&
+      (!filter || s.name.toLowerCase().includes(filter.toLowerCase()) || (s.model || '').toLowerCase().includes(filter.toLowerCase()))
+    )
+    return sortedByOrderIndex(list)
+  }
+
+  const [archiveExpanded, setArchiveExpanded] = useState({})
 
   return (
     <aside className="w-72 bg-bg-secondary border-r border-border-primary flex flex-col shrink-0">
@@ -1279,38 +1316,47 @@ export default function Sidebar() {
                         {session.branch_label}
                       </span>
                     )}
+                    {/* Multiplayer: peer presence dots */}
+                    {(() => {
+                      const viewing = Object.entries(peers).filter(([cid, p]) => p.viewing_session === session.id && cid !== myClientId)
+                      return viewing.length > 0 ? (
+                        <div className="flex items-center -space-x-0.5 shrink-0">
+                          {viewing.slice(0, 2).map(([cid, p]) => (
+                            <span
+                              key={cid}
+                              className="w-3 h-3 rounded-full text-[6px] font-bold text-white flex items-center justify-center ring-1 ring-bg-primary"
+                              style={{ background: p.color }}
+                              title={p.name}
+                            >
+                              {p.name?.[0]?.toUpperCase() || '?'}
+                            </span>
+                          ))}
+                          {viewing.length > 2 && (
+                            <span className="text-[7px] text-text-faint ml-0.5">+{viewing.length - 2}</span>
+                          )}
+                        </div>
+                      ) : null
+                    })()}
                     <span
                       className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                        compactionState[session.id]?.status === 'compacting'
-                          ? 'bg-yellow-400 animate-pulse'
-                          : compactionState[session.id]?.status === 'compacted'
-                            ? 'bg-yellow-400'
-                            : compactionState[session.id]?.status === 'warning'
-                              ? 'bg-orange-400'
-                              : planWaiting[session.id]
-                                ? 'bg-amber-400 animate-subtle-pulse'
-                                : isActive(session.id)
-                                  ? 'bg-red-400 animate-subtle-pulse'
-                                  : session.status === 'running'
-                                    ? 'bg-green-400'
-                                    : session.status === 'replaying'
-                                      ? 'bg-yellow-400 animate-subtle-pulse'
-                                      : session.status === 'exited'
-                                        ? 'bg-red-400'
-                                        : 'bg-zinc-600'
+                        planWaiting[session.id] || isActive(session.id)
+                          ? 'bg-amber-400 animate-subtle-pulse'
+                          : compactionState[session.id]?.status === 'compacting' || compactionState[session.id]?.status === 'warning'
+                            ? 'bg-orange-400 animate-pulse'
+                            : session.status === 'running'
+                              ? 'bg-green-400'
+                              : session.status === 'exited'
+                                ? 'bg-zinc-500'
+                                : 'bg-zinc-600'
                       }`}
                       title={
-                        compactionState[session.id]?.status === 'compacting'
-                          ? 'Auto-compacting context...'
-                          : compactionState[session.id]?.status === 'compacted'
-                            ? 'Context just auto-compacted'
-                            : compactionState[session.id]?.status === 'warning'
-                              ? `Only ${compactionState[session.id].percent_left}% context left until auto-compact`
-                              : planWaiting[session.id]
-                                ? 'Needs your input'
-                                : isActive(session.id)
-                                  ? 'Working...'
-                                  : session.status
+                        planWaiting[session.id] ? 'Waiting for input'
+                        : isActive(session.id) ? 'Needs attention'
+                        : compactionState[session.id]?.status === 'compacting' ? 'Compacting context'
+                        : compactionState[session.id]?.status === 'warning' ? `${compactionState[session.id].percent_left}% context left`
+                        : session.status === 'running' ? 'Running'
+                        : session.status === 'exited' ? 'Exited'
+                        : 'Idle'
                       }
                     />
                     <Trash2
@@ -1352,6 +1398,47 @@ export default function Sidebar() {
                   </div>
                   )
                 })}
+
+                {/* Archive section */}
+                {(() => {
+                  const archived = archivedSessions(ws.id)
+                  if (archived.length === 0) return null
+                  const isArchiveOpen = archiveExpanded[ws.id]
+                  return (
+                    <div className="border-t border-border-secondary/50">
+                      <button
+                        onClick={() => setArchiveExpanded((p) => ({ ...p, [ws.id]: !p[ws.id] }))}
+                        className="w-full flex items-center gap-1.5 px-3 py-1.5 text-[10px] text-text-faint hover:text-text-secondary hover:bg-bg-hover transition-colors"
+                      >
+                        {isArchiveOpen ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                        <Archive size={10} />
+                        <span className="font-medium">Archive</span>
+                        <span className="ml-auto text-[9px] font-mono opacity-70">{archived.length}</span>
+                      </button>
+                      {isArchiveOpen && archived.map((session) => (
+                        <button
+                          key={session.id}
+                          onClick={() => useStore.getState().openSession(session.id)}
+                          onContextMenu={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            setCtxMenu({ x: e.clientX, y: e.clientY, session })
+                          }}
+                          className={`group w-full flex items-center gap-1.5 pl-5 pr-2 py-1.5 text-xs text-left transition-all ${
+                            activeSessionId === session.id
+                              ? 'bg-bg-hover text-text-primary border-l-2'
+                              : 'text-text-faint hover:bg-bg-hover/50 border-l-2 border-l-transparent'
+                          }`}
+                          style={activeSessionId === session.id ? { borderLeftColor: getWorkspaceColor(ws) } : undefined}
+                        >
+                          <MessageSquare size={11} className="shrink-0 opacity-50" />
+                          <span className="truncate flex-1 min-w-0 opacity-60">{session.name}</span>
+                          <span className="text-text-faint/50 text-[10px] font-mono">{session.model}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )
+                })()}
 
                 {newSessionFor === ws.id ? (
                   <NewSessionForm workspaceId={ws.id} onClose={() => setNewSessionFor(null)} />
@@ -1438,7 +1525,7 @@ export default function Sidebar() {
                       try {
                         const s = await api.startCommander(wsId, { cli_type: opt.cli, model: opt.model })
                         useStore.getState().addSession(s)
-                      } catch (e) { console.error(e) }
+                      } catch (e) { console.error(e); useStore.getState().addNotification({ type: 'error', message: `Commander failed: ${e.message}` }) }
                     }
                   }}
                   className={`w-full text-left px-2 py-1.5 text-xs font-medium border rounded-md transition-colors ${opt.style}`}
@@ -1478,7 +1565,7 @@ export default function Sidebar() {
                       try {
                         const s = await api.startTester(wsId, { cli_type: opt.cli, model: opt.model })
                         useStore.getState().addSession(s)
-                      } catch (e) { console.error(e) }
+                      } catch (e) { console.error(e); useStore.getState().addNotification({ type: 'error', message: `Tester failed: ${e.message}` }) }
                     }
                   }}
                   className={`w-full text-left px-2 py-1.5 text-xs font-medium border rounded-md transition-colors ${opt.style}`}
@@ -1531,7 +1618,7 @@ export default function Sidebar() {
                         setTimeout(() => {
                           sendTerminalCommand(s.id, 'Begin documenting this project now. Start with get_knowledge_base() to understand the product, then scaffold_docs() and systematically document each feature with screenshots and GIF demos. Build the site when done.')
                         }, 3000)
-                      } catch (e) { console.error(e) }
+                      } catch (e) { console.error(e); useStore.getState().addNotification({ type: 'error', message: `Documentor failed: ${e.message}` }) }
                     }
                   }}
                   className={`w-full text-left px-2 py-1.5 text-xs font-medium border rounded-md transition-colors ${opt.style}`}
@@ -1573,6 +1660,16 @@ export default function Sidebar() {
         >
           <FileText size={11} />
           Docs Hub
+        </button>
+        <button
+          onClick={() => {
+            window.dispatchEvent(new CustomEvent('open-panel', { detail: 'observatory' }))
+          }}
+          className="flex-1 flex items-center justify-center gap-1 px-1.5 py-1 text-[11px] text-text-faint hover:text-cyan-400 hover:bg-bg-hover rounded transition-colors"
+          title="Observatory (⌘⇧O)"
+        >
+          <Telescope size={11} />
+          Observe
         </button>
       </div>
 

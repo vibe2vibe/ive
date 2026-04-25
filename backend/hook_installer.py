@@ -371,13 +371,20 @@ def _is_myelin_hook(hook: dict) -> bool:
     return _MYELIN_MARKER in hook.get("command", "")
 
 
+def _myelin_cmd(event: str) -> str:
+    from resource_path import is_frozen, project_root
+    if is_frozen():
+        return f"{project_root() / 'bin' / 'ive-myelin-hook'} --event {event}"
+    return f"python3 -m myelin.coordination.hook --event {event}"
+
+
 def _myelin_prompt_entry() -> dict:
     """UserPromptSubmit / BeforeAgent hook — captures user intent."""
     return {
         "matcher": "",
         "hooks": [{
             "type": "command",
-            "command": f"python3 -m myelin.coordination.hook --event user_prompt",
+            "command": _myelin_cmd("user_prompt"),
         }],
     }
 
@@ -388,7 +395,7 @@ def _myelin_tool_entry(matcher: str = "Edit|Write|MultiEdit|NotebookEdit") -> di
         "matcher": matcher,
         "hooks": [{
             "type": "command",
-            "command": f"python3 -m myelin.coordination.hook --event pre_tool",
+            "command": _myelin_cmd("pre_tool"),
         }],
     }
 
@@ -574,6 +581,18 @@ HOOKEOF
 fi
 
 # ── Tier 2: Commander API evaluation ──────────────────────────────────
+# Package manager commands need full AVCP scan + LLM analysis — no timeout.
+# Normal tool calls use a short timeout so a down Commander doesn't block the CLI.
+MAX_TIME="0.5"
+if [ -n "$COMMAND" ]; then
+  case "$COMMAND" in
+    *"pip install"*|*"pip3 install"*|*"npm install"*|*"npm i "*|*"npm add"*|\
+    *"yarn add"*|*"pnpm add"*|*"bun add"*|*"cargo add"*|*"cargo install"*|\
+    *"go get "*|*"go install"*|*"gem install"*|*"composer require"*|*"brew install"*)
+      MAX_TIME="120"
+      ;;
+  esac
+fi
 RESP=$(echo "$INPUT" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
@@ -588,7 +607,7 @@ print(json.dumps(payload))
 " 2>/dev/null | curl -s -X POST \\
   "${COMMANDER_API_URL}/api/safety/evaluate" \\
   -H "Content-Type: application/json" \\
-  --max-time 0.1 \\
+  --max-time "$MAX_TIME" \\
   -d @- 2>/dev/null)
 
 # Parse API response

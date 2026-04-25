@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { X, LayoutGrid, Plus, Layers, Search } from 'lucide-react'
+import { X, LayoutGrid, Plus, Layers, Search, GitBranch } from 'lucide-react'
 import { api } from '../../lib/api'
 import useStore from '../../state/store'
 import { matchesKey, formatKeyCombo } from '../../lib/keybindings'
 import TaskCard from './TaskCard'
 import TaskDetailModal from './TaskDetailModal'
 import NewTaskForm from './NewTaskForm'
+import DependencyGraph from './DependencyGraph'
 import usePanelCreate from '../../hooks/usePanelCreate'
 
 const COLUMNS = [
@@ -42,6 +43,7 @@ export default function FeatureBoard({ onClose }) {
   const [showNewTask, setShowNewTask] = useState(false)
   const [dragOverCol, setDragOverCol] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [viewMode, setViewMode] = useState('kanban') // 'kanban' | 'graph'
   const searchRef = useRef(null)
 
   // Workspace tab: null = "All projects", or a specific workspace id.
@@ -403,6 +405,26 @@ export default function FeatureBoard({ onClose }) {
               </button>
             )}
           </div>
+          <div className="flex items-center border border-zinc-700/50 rounded overflow-hidden">
+            <button
+              onClick={() => setViewMode('kanban')}
+              className={`px-2 py-1 text-[10px] font-mono flex items-center gap-1 transition-colors ${
+                viewMode === 'kanban' ? 'bg-indigo-600/20 text-indigo-300' : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+              title="Kanban view"
+            >
+              <LayoutGrid size={10} /> kanban
+            </button>
+            <button
+              onClick={() => setViewMode('graph')}
+              className={`px-2 py-1 text-[10px] font-mono flex items-center gap-1 transition-colors border-l border-zinc-700/50 ${
+                viewMode === 'graph' ? 'bg-indigo-600/20 text-indigo-300' : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+              title="Dependency graph"
+            >
+              <GitBranch size={10} /> graph
+            </button>
+          </div>
           <span className="text-[11px] font-mono text-zinc-500">
             {totalCount} tasks
           </span>
@@ -447,77 +469,85 @@ export default function FeatureBoard({ onClose }) {
           })}
         </div>
 
-        {/* Columns */}
-        <div className="flex-1 flex gap-1.5 p-4 overflow-x-auto min-h-0">
-          {COLUMNS.map((col, colIdx) => {
-            const colTasks = tasksByColumn[col.key] || []
-            const isOver = dragOverCol === col.key
-            const isColFocused = focusCol === colIdx
+        {/* Content: Kanban or Graph */}
+        {viewMode === 'kanban' ? (
+          <div className="flex-1 flex gap-1.5 p-4 overflow-x-auto min-h-0">
+            {COLUMNS.map((col, colIdx) => {
+              const colTasks = tasksByColumn[col.key] || []
+              const isOver = dragOverCol === col.key
+              const isColFocused = focusCol === colIdx
 
-            return (
-              <div
-                key={col.key}
-                className={`flex flex-col w-[240px] min-w-[240px] rounded-lg border transition-colors ${
-                  isOver
-                    ? 'border-indigo-500/50 bg-indigo-500/5'
-                    : isColFocused
-                      ? 'border-zinc-700 bg-[#111118]/50'
-                      : 'border-zinc-800 bg-[#111118]/30'
-                }`}
-                onDragOver={(e) => handleDragOver(e, col.key)}
-                onDragLeave={handleDragLeave}
-                onDrop={(e) => handleDrop(e, col.key)}
-              >
-                {/* Column header */}
-                <div className="flex items-center gap-1 px-2.5 py-1.5 border-b border-zinc-800/50 shrink-0">
-                  <span className={`text-[11px] font-mono font-semibold uppercase tracking-wider ${columnAccent[col.key]}`}>
-                    {col.label}
-                  </span>
-                  <span className="text-[11px] font-mono text-zinc-700">
-                    {colTasks.length}
-                  </span>
-                  <div className="flex-1" />
-                  {col.key === 'backlog' && (
-                    <button
-                      onClick={() => setShowNewTask(!showNewTask)}
-                      className="text-zinc-600 hover:text-indigo-400 transition-colors"
-                    >
-                      <Plus size={12} />
-                    </button>
+              return (
+                <div
+                  key={col.key}
+                  className={`flex flex-col w-[240px] min-w-[240px] rounded-lg border transition-colors ${
+                    isOver
+                      ? 'border-indigo-500/50 bg-indigo-500/5'
+                      : isColFocused
+                        ? 'border-zinc-700 bg-[#111118]/50'
+                        : 'border-zinc-800 bg-[#111118]/30'
+                  }`}
+                  onDragOver={(e) => handleDragOver(e, col.key)}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDrop(e, col.key)}
+                >
+                  {/* Column header */}
+                  <div className="flex items-center gap-1 px-2.5 py-1.5 border-b border-zinc-800/50 shrink-0">
+                    <span className={`text-[11px] font-mono font-semibold uppercase tracking-wider ${columnAccent[col.key]}`}>
+                      {col.label}
+                    </span>
+                    <span className="text-[11px] font-mono text-zinc-700">
+                      {colTasks.length}
+                    </span>
+                    <div className="flex-1" />
+                    {col.key === 'backlog' && (
+                      <button
+                        onClick={() => setShowNewTask(!showNewTask)}
+                        className="text-zinc-600 hover:text-indigo-400 transition-colors"
+                      >
+                        <Plus size={12} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* New task form (backlog only) */}
+                  {col.key === 'backlog' && showNewTask && (
+                    <NewTaskForm
+                      workspaceId={effectiveWsId}
+                      onCreated={handleTaskCreated}
+                      onClose={() => setShowNewTask(false)}
+                    />
                   )}
-                </div>
 
-                {/* New task form (backlog only) */}
-                {col.key === 'backlog' && showNewTask && (
-                  <NewTaskForm
-                    workspaceId={effectiveWsId}
-                    onCreated={handleTaskCreated}
-                    onClose={() => setShowNewTask(false)}
-                  />
-                )}
-
-                {/* Cards */}
-                <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-                  {colTasks.map((task, rowIdx) => (
-                    <div key={task.id} data-focus={`${colIdx}-${rowIdx}`}>
-                      <TaskCard
-                        task={task}
-                        isFocused={focusCol === colIdx && focusRow === rowIdx}
-                        workspaceName={isAllView ? wsMap[task.workspace_id] : undefined}
-                        onClick={(t) => setSelectedTask(t)}
-                      />
-                    </div>
-                  ))}
-                  {colTasks.length === 0 && !showNewTask && (
-                    <div className="text-center py-6 text-[11px] font-mono text-zinc-700">
-                      no tasks
-                    </div>
-                  )}
+                  {/* Cards */}
+                  <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+                    {colTasks.map((task, rowIdx) => (
+                      <div key={task.id} data-focus={`${colIdx}-${rowIdx}`}>
+                        <TaskCard
+                          task={task}
+                          isFocused={focusCol === colIdx && focusRow === rowIdx}
+                          workspaceName={isAllView ? wsMap[task.workspace_id] : undefined}
+                          onClick={(t) => setSelectedTask(t)}
+                        />
+                      </div>
+                    ))}
+                    {colTasks.length === 0 && !showNewTask && (
+                      <div className="text-center py-6 text-[11px] font-mono text-zinc-700">
+                        no tasks
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )
-          })}
-        </div>
+              )
+            })}
+          </div>
+        ) : (
+          <DependencyGraph
+            tasks={filteredTasks}
+            onTaskClick={(t) => setSelectedTask(t)}
+            workspaceId={effectiveWsId}
+          />
+        )}
 
         {/* Footer */}
         <div className="flex items-center gap-4 px-5 py-1.5 border-t border-zinc-800 shrink-0">

@@ -75,6 +75,9 @@ export default function ExperimentalPanel({ onClose }) {
           <span className="text-[10px] text-amber-400/80 font-mono uppercase px-1.5 py-0.5 bg-amber-500/10 rounded border border-amber-500/20">
             opt-in
           </span>
+          <span className="text-[10px] text-blue-400/70 px-1.5 py-0.5 bg-blue-500/8 rounded border border-blue-500/15">
+            Global
+          </span>
           <div className="flex-1" />
           <button
             onClick={onClose}

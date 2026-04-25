@@ -71,7 +71,7 @@ async def llm_call(
         # Claude: claude -p "$(cat file)"  — but that requires shell.
         # Safer: pass via stdin by omitting the prompt arg.
         tmp = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".txt", delete=False, prefix="llm_prompt_"
+            mode="w", suffix=".txt", delete=False, prefix=f"llm_prompt_{os.getpid()}_"
         )
         tmp.write(full_prompt)
         tmp.close()
@@ -102,6 +102,7 @@ async def llm_call(
             stdin=asyncio.subprocess.PIPE if stdin_data else asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd="/tmp",  # neutral dir — prevent CLI from loading project CLAUDE.md
         )
         try:
             stdout, stderr = await asyncio.wait_for(

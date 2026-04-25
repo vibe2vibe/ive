@@ -213,7 +213,8 @@ export default function PromptPalette({ onClose, startInCreate = false, startTab
     setCascadeMode('edit')
     setCascadeEditId(cascade.id)
     setCascadeName(cascade.name)
-    setCascadeSteps([...cascade.steps, ''])
+    const s = Array.isArray(cascade.steps) ? cascade.steps.map(String) : []
+    setCascadeSteps([...s, ''])
     setCascadeLoop(!!cascade.loop)
     setCascadeAutoApprove(!!cascade.auto_approve)
     setCascadeBypass(!!cascade.bypass_permissions)
@@ -427,18 +428,20 @@ export default function PromptPalette({ onClose, startInCreate = false, startTab
             <div className="max-h-[55vh] overflow-y-auto">
               {cascadeRunner?.running && (
                 <div className="px-4 py-2 bg-indigo-500/10 border-b border-indigo-500/20 text-[11px] text-indigo-300 font-mono">
-                  Running: {cascadeRunner.name} — step {cascadeRunner.currentStep + 1}/{cascadeRunner.steps.length}
+                  Running: {cascadeRunner.name} — step {cascadeRunner.currentStep + 1}/{cascadeRunner.totalSteps || cascadeRunner.steps?.length || 0}
                   {cascadeRunner.loop && cascadeRunner.iteration > 0 && ` (loop #${cascadeRunner.iteration + 1})`}
                 </div>
               )}
-              {cascades.map((cascade) => (
+              {cascades.map((cascade) => {
+                const cSteps = Array.isArray(cascade.steps) ? cascade.steps : []
+                return (
                 <div key={cascade.id}
                   className="group flex items-start gap-2 px-4 py-2.5 border-b border-border-secondary hover:bg-bg-hover/50 transition-colors">
                   <ListOrdered size={12} className="text-indigo-400/60 mt-0.5 shrink-0" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs text-text-primary font-mono font-medium">{cascade.name}</span>
-                      <span className="text-[10px] text-text-faint font-mono">{cascade.steps.length} steps</span>
+                      <span className="text-[10px] text-text-faint font-mono">{cSteps.length} steps</span>
                       {cascade.variables?.length > 0 && (
                         <span className="flex items-center gap-0.5 text-[10px] text-indigo-400/60 font-mono">
                           <Variable size={8} />{cascade.variables.length}
@@ -447,13 +450,13 @@ export default function PromptPalette({ onClose, startInCreate = false, startTab
                       {cascade.loop ? <RotateCcw size={9} className="text-indigo-400/50" title="Loops" /> : null}
                     </div>
                     <div className="flex flex-col gap-0.5 mt-1">
-                      {cascade.steps.slice(0, 3).map((step, i) => (
+                      {cSteps.slice(0, 3).map((step, i) => (
                         <span key={i} className="text-[10px] text-text-muted font-mono truncate">
-                          {i + 1}. {step.length > 80 ? step.slice(0, 80) + '...' : step}
+                          {i + 1}. {String(step).length > 80 ? String(step).slice(0, 80) + '...' : String(step)}
                         </span>
                       ))}
-                      {cascade.steps.length > 3 && (
-                        <span className="text-[10px] text-text-faint font-mono">+{cascade.steps.length - 3} more</span>
+                      {cSteps.length > 3 && (
+                        <span className="text-[10px] text-text-faint font-mono">+{cSteps.length - 3} more</span>
                       )}
                     </div>
                   </div>
@@ -472,7 +475,8 @@ export default function PromptPalette({ onClose, startInCreate = false, startTab
                     </button>
                   </div>
                 </div>
-              ))}
+              )})}
+
               {cascades.length === 0 && (
                 <div className="px-4 py-10 text-xs text-text-faint text-center space-y-1">
                   <ListOrdered size={20} className="mx-auto text-text-faint/30" />
@@ -525,9 +529,23 @@ export default function PromptPalette({ onClose, startInCreate = false, startTab
                 className="w-full px-2.5 py-1.5 text-xs bg-bg-inset border border-border-primary rounded-md text-text-primary placeholder-text-faint focus:outline-none ide-focus-ring font-mono resize-none transition-colors"
               />
             )}
-            <div className="flex gap-1.5">
+            <div className="flex items-center gap-1.5">
               <button type="submit" className="px-3 py-1.5 text-xs font-medium bg-accent-primary hover:bg-accent-hover text-white rounded-md transition-colors">{editingId ? 'update' : 'save'}</button>
               <button type="button" onClick={() => { setMode('list'); setEditingId(null); setNewName(''); setNewContent('') }} className="px-3 py-1.5 text-xs font-medium bg-bg-tertiary hover:bg-bg-hover text-text-secondary rounded-md transition-colors">cancel</button>
+              {editingId && (() => {
+                const p = prompts.find((x) => x.id === editingId)
+                if (!p) return null
+                return (
+                  <div className="flex items-center gap-1 ml-auto">
+                    <button type="button" onClick={(e) => handlePin(e, p)} className={`p-1 rounded transition-colors ${p.pinned ? 'text-accent-primary' : 'text-text-faint hover:text-accent-primary'}`} title={p.pinned ? 'Unpin' : 'Pin'}>
+                      <Pin size={11} />
+                    </button>
+                    <button type="button" onClick={(e) => handleToggleQuickAction(e, p)} className={`p-1 rounded transition-colors ${p.is_quickaction ? 'text-amber-400' : 'text-text-faint hover:text-amber-400'}`} title={p.is_quickaction ? 'Remove from Quick Actions' : 'Add to Quick Actions'}>
+                      <Zap size={11} />
+                    </button>
+                  </div>
+                )
+              })()}
             </div>
           </form>
         ) : (
@@ -553,6 +571,7 @@ export default function PromptPalette({ onClose, startInCreate = false, startTab
                       <span className="text-xs text-text-primary font-mono flex-1">{prompt.name}</span>
                       <span className="text-[10px] text-text-faint font-mono">{prompt.category}</span>
                       {prompt.pinned ? <Pin size={10} className="text-accent-primary" /> : null}
+                      {prompt.is_quickaction ? <Zap size={10} className="text-amber-400" /> : null}
                       <Eye
                         size={10}
                         className={`${expandedId === prompt.id ? 'text-accent-primary opacity-100' : 'opacity-0 group-hover:opacity-100 text-text-faint hover:text-accent-primary'} transition-all cursor-pointer`}
@@ -560,17 +579,7 @@ export default function PromptPalette({ onClose, startInCreate = false, startTab
                           e.stopPropagation()
                           setExpandedId(expandedId === prompt.id ? null : prompt.id)
                         }}
-                      />
-                      <Zap
-                        size={10}
-                        className={`${prompt.is_quickaction ? 'text-amber-400 opacity-100' : 'opacity-0 group-hover:opacity-100 text-text-faint hover:text-amber-400'} transition-all cursor-pointer`}
-                        onClick={(e) => handleToggleQuickAction(e, prompt)}
-                        title={prompt.is_quickaction ? 'Remove from Quick Actions' : 'Add to Quick Actions'}
-                      />
-                      <Pin
-                        size={10}
-                        className="opacity-0 group-hover:opacity-100 text-text-faint hover:text-accent-primary transition-all cursor-pointer"
-                        onClick={(e) => handlePin(e, prompt)}
+                        title="Preview"
                       />
                       <Edit3
                         size={10}
@@ -582,6 +591,7 @@ export default function PromptPalette({ onClose, startInCreate = false, startTab
                         size={10}
                         className="opacity-0 group-hover:opacity-100 text-text-faint hover:text-red-400 transition-all cursor-pointer"
                         onClick={(e) => handleDelete(e, prompt.id)}
+                        title="Delete"
                       />
                     </div>
                     <div className="text-[11px] text-text-muted font-mono mt-0.5 truncate">

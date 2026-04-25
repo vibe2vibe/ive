@@ -34,6 +34,7 @@ _broadcast = None
 _advance_timers: dict[str, object] = {}
 
 ADVANCE_DELAY_S = 1.5  # seconds after idle before advancing (debounce)
+CASCADE_MAX_ITERATIONS = 50  # safety limit for looping cascades
 
 
 def set_pty_manager(mgr):
@@ -252,6 +253,22 @@ async def _advance(run_id: str):
 
     if next_step >= len(steps):
         if run["loop"]:
+            # Safety: enforce max iteration limit for looping cascades
+            if next_iteration >= CASCADE_MAX_ITERATIONS:
+                db = await get_db()
+                try:
+                    await db.execute(
+                        "UPDATE cascade_runs SET status = 'completed', error = 'Max iterations reached', completed_at = datetime('now') WHERE id = ?",
+                        (run_id,),
+                    )
+                    await db.commit()
+                finally:
+                    await db.close()
+                run = await get_run(run_id)
+                await _broadcast_progress(run, event="cascade_completed")
+                logger.warning("Cascade run %s hit max iterations (%d)", run_id[:8], CASCADE_MAX_ITERATIONS)
+                return
+
             # Loop: check if reprompt needed
             if run["loop_reprompt"]:
                 variables = json.loads(run["variables"] or "[]")

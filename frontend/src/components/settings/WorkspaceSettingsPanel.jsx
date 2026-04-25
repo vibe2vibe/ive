@@ -122,6 +122,7 @@ export default function WorkspaceSettingsPanel({ onClose, initialWorkspaceId }) 
         <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border-primary">
           <FolderOpen size={14} className="text-accent-primary" />
           <span className="text-xs text-text-secondary font-medium">Workspace Settings</span>
+          <span className="text-[10px] text-emerald-400/70 px-1.5 py-0.5 bg-emerald-500/8 rounded border border-emerald-500/15">Per workspace</span>
           <span className="text-[10px] text-text-faint font-mono">
             {workspaces.length} workspace{workspaces.length !== 1 ? 's' : ''}
           </span>
@@ -504,6 +505,10 @@ export default function WorkspaceSettingsPanel({ onClose, initialWorkspaceId }) 
                         </Field>
                       )}
 
+                      {/* Memory */}
+                      <div className="text-[10px] text-text-muted font-semibold uppercase tracking-wider mt-2 mb-1">Memory</div>
+                      <MemorySettingsSection workspaceId={ws.id} />
+
                       {/* Automation */}
                       <div className="text-[10px] text-text-muted font-semibold uppercase tracking-wider mt-2 mb-1">Automation</div>
 
@@ -640,6 +645,194 @@ export default function WorkspaceSettingsPanel({ onClose, initialWorkspaceId }) 
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+function MemorySettingsSection({ workspaceId }) {
+  const [settings, setSettings] = useState(null)
+  const [status, setStatus] = useState(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState(null)
+  const [resolving, setResolving] = useState(false)
+  const [resolveContent, setResolveContent] = useState('')
+  const [diffData, setDiffData] = useState(null)
+
+  const loadData = useCallback(async () => {
+    try {
+      const [s, st] = await Promise.all([
+        api.getWorkspaceMemorySettings(workspaceId),
+        api.getWorkspaceMemory(workspaceId).catch(() => null),
+      ])
+      setSettings(s)
+      setStatus(st)
+    } catch {
+      setSettings({ enabled: true, auto_sync: true, memory_max_chars: 4000 })
+    }
+  }, [workspaceId])
+
+  useEffect(() => { loadData() }, [loadData])
+
+  const update = async (key, value) => {
+    const next = { ...settings, [key]: value }
+    setSettings(next)
+    try { await api.updateWorkspaceMemorySettings(workspaceId, { [key]: value }) } catch { /* ignore */ }
+  }
+
+  const handleSync = async () => {
+    setSyncing(true)
+    try {
+      const result = await api.syncWorkspaceMemory(workspaceId)
+      setSyncResult(result)
+      await loadData()
+    } catch { /* ignore */ }
+    setSyncing(false)
+  }
+
+  const handleStartResolve = async () => {
+    try {
+      const diff = await api.getWorkspaceMemoryDiff(workspaceId)
+      setDiffData(diff)
+      setResolveContent(status?.content || '')
+      setResolving(true)
+    } catch { /* ignore */ }
+  }
+
+  const handleSubmitResolve = async () => {
+    try {
+      await api.resolveWorkspaceMemory(workspaceId, resolveContent)
+      setResolving(false)
+      setDiffData(null)
+      setSyncResult(null)
+      await loadData()
+    } catch { /* ignore */ }
+  }
+
+  if (!settings) return null
+
+  const providers = status?.providers || {}
+  const hasConflicts = syncResult?.status === 'conflicts' && syncResult?.conflict_count > 0
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => update('enabled', !settings.enabled)}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded text-[11px] font-mono border transition-colors flex-1 ${
+            settings.enabled
+              ? 'border-accent-primary bg-accent-primary/15 text-accent-primary'
+              : 'border-border-secondary text-text-faint hover:border-border-primary hover:text-text-secondary'
+          }`}
+        >
+          <Brain size={12} />
+          <span>{settings.enabled ? 'Sync Enabled' : 'Sync Disabled'}</span>
+        </button>
+        {settings.enabled && (
+          <button
+            onClick={() => update('auto_sync', !settings.auto_sync)}
+            className={`px-2.5 py-1.5 rounded text-[10px] font-mono border transition-colors ${
+              settings.auto_sync
+                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+                : 'border-border-secondary text-text-faint hover:border-border-primary'
+            }`}
+            title="Automatically sync when CLI memory files change"
+          >
+            {settings.auto_sync ? 'Auto' : 'Manual'}
+          </button>
+        )}
+      </div>
+
+      {settings.enabled && (
+        <>
+          <div className="flex items-center gap-2">
+            <label className="text-[10px] text-text-faint">Max chars</label>
+            <input
+              type="number"
+              min={1000}
+              max={10000}
+              step={500}
+              value={settings.memory_max_chars || 4000}
+              onChange={(e) => update('memory_max_chars', parseInt(e.target.value) || 4000)}
+              className="ide-input text-[11px] w-20 px-2 py-1"
+            />
+            <button
+              onClick={handleSync}
+              disabled={syncing}
+              className="ml-auto px-2.5 py-1 rounded text-[10px] font-mono border border-border-secondary text-text-secondary hover:border-border-primary hover:text-text-primary transition-colors disabled:opacity-50"
+            >
+              {syncing ? 'Syncing...' : 'Sync Now'}
+            </button>
+          </div>
+
+          {/* Provider status */}
+          {Object.keys(providers).length > 0 && (
+            <div className="space-y-1">
+              {Object.entries(providers).map(([cli, info]) => (
+                <div key={cli} className="flex items-center gap-2 text-[10px] font-mono text-text-faint">
+                  <span className={`w-1.5 h-1.5 rounded-full ${
+                    !info.file_exists ? 'bg-zinc-600'
+                    : info.synced ? 'bg-emerald-400'
+                    : info.changed ? 'bg-amber-400'
+                    : 'bg-zinc-500'
+                  }`} />
+                  <span className="text-text-secondary">{cli}</span>
+                  <span className="truncate flex-1 opacity-60">{info.filename || '—'}</span>
+                  <span>{info.file_exists ? (info.synced ? 'synced' : 'changed') : 'no file'}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {status?.last_synced_at && (
+            <div className="text-[9px] text-text-faint">
+              Last synced: {new Date(status.last_synced_at).toLocaleString()}
+            </div>
+          )}
+
+          {hasConflicts && !resolving && (
+            <button
+              onClick={handleStartResolve}
+              className="w-full px-2.5 py-1.5 rounded text-[11px] font-mono bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/30 transition-colors"
+            >
+              <Brain size={10} className="inline mr-1" />
+              {syncResult.conflict_count} conflict{syncResult.conflict_count !== 1 ? 's' : ''} — Resolve
+            </button>
+          )}
+
+          {resolving && (
+            <div className="space-y-2 border border-red-500/20 rounded p-2">
+              <div className="text-[10px] text-red-300 font-mono">Resolve merge conflicts</div>
+              {diffData && Object.entries(diffData).map(([cli, d]) => (
+                <details key={cli} className="text-[10px] font-mono text-text-faint">
+                  <summary className="cursor-pointer hover:text-text-secondary">{cli}: {d.filename}</summary>
+                  <pre className="mt-1 p-1.5 bg-black/30 rounded text-[9px] overflow-x-auto max-h-32 overflow-y-auto">{d.diff}</pre>
+                </details>
+              ))}
+              <textarea
+                value={resolveContent}
+                onChange={(e) => setResolveContent(e.target.value)}
+                rows={8}
+                className="w-full ide-input text-[10px] font-mono p-2 resize-y"
+                placeholder="Edit the resolved content..."
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSubmitResolve}
+                  className="px-2.5 py-1 rounded text-[10px] font-mono bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 transition-colors"
+                >
+                  Save Resolution
+                </button>
+                <button
+                  onClick={() => { setResolving(false); setDiffData(null) }}
+                  className="px-2.5 py-1 rounded text-[10px] font-mono text-text-faint hover:text-text-secondary transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   )
 }

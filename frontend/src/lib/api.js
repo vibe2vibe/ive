@@ -119,6 +119,12 @@ export const api = {
   },
   syncAgentSkill: (data) =>
     request('/skills/sync', { method: 'POST', body: JSON.stringify(data) }),
+  searchSkills: (query, limit = 5) =>
+    request(`/skills/search?q=${encodeURIComponent(query)}&limit=${limit}`),
+  getSkillContent: (name) =>
+    request(`/skills/content?name=${encodeURIComponent(name)}`),
+  dismissSkillSuggestion: (sessionId, entityId) =>
+    request('/skills/dismiss-suggestion', { method: 'POST', body: JSON.stringify({ session_id: sessionId, entity_id: entityId }) }),
 
   // Guidelines
   getGuidelines: () => request('/guidelines'),
@@ -200,6 +206,8 @@ export const api = {
     fetch(`${BASE}/sessions/${id}/export?format=${format}`),
   distillSession: (id, data) =>
     request(`/sessions/${id}/distill`, { method: 'POST', body: JSON.stringify(data) }),
+  summarizeSession: (id) =>
+    request(`/sessions/${id}/summarize`, { method: 'POST', body: JSON.stringify({}) }),
 
   // Search
   search: (query) => request(`/search?q=${encodeURIComponent(query)}`),
@@ -227,9 +235,17 @@ export const api = {
     request('/plan-file', { method: 'PUT', body: JSON.stringify({ path, content }) }),
 
   // Deep research jobs (subprocess runner — distinct from Research DB CRUD below)
+  decomposeResearchPlan: (query) => request('/research/plan', { method: 'POST', body: JSON.stringify({ query }) }),
   startResearch: (data) => request('/research/jobs', { method: 'POST', body: JSON.stringify(data) }),
   listResearchJobs: () => request('/research/jobs'),
+  steerResearchJob: (jobId, queries) => request(`/research/jobs/${jobId}/steer`, { method: 'POST', body: JSON.stringify({ queries }) }),
   stopResearchJob: (jobId) => request(`/research/jobs/${jobId}`, { method: 'DELETE' }),
+
+  // Research schedules (recurring/cron)
+  getResearchSchedules: (workspaceId) => request(`/research/schedules${workspaceId ? `?workspace_id=${workspaceId}` : ''}`),
+  createResearchSchedule: (data) => request('/research/schedules', { method: 'POST', body: JSON.stringify(data) }),
+  updateResearchSchedule: (id, data) => request(`/research/schedules/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteResearchSchedule: (id) => request(`/research/schedules/${id}`, { method: 'DELETE' }),
 
   // Tasks
   getTasks: (workspaceId, status) => request(workspaceId ? `/tasks?workspace=${workspaceId}${status ? `&status=${status}` : ''}` : '/tasks'),
@@ -379,10 +395,29 @@ export const api = {
     request(`/safety/rules/${id}`, { method: 'DELETE' }),
   seedSafetyRules: () =>
     request('/safety/rules/seed', { method: 'POST' }),
+  getExternalAccessLog: (params = {}) => {
+    const qs = new URLSearchParams(params).toString()
+    return request(`/safety/access-log${qs ? '?' + qs : ''}`)
+  },
+  getCommandLog: (params = {}) => {
+    const qs = new URLSearchParams(params).toString()
+    return request(`/safety/command-log${qs ? '?' + qs : ''}`)
+  },
+  getPackageScans: (params = {}) => {
+    const qs = new URLSearchParams(params).toString()
+    return request(`/safety/package-scans${qs ? '?' + qs : ''}`)
+  },
   getSafetyDecisions: (params = {}) => {
     const qs = new URLSearchParams(params).toString()
     return request(`/safety/decisions${qs ? '?' + qs : ''}`)
   },
+  getInstallScriptPolicy: () => request('/safety/install-script-policy'),
+  setInstallScriptPolicy: (blockAll) =>
+    request('/safety/install-script-policy', { method: 'PUT', body: JSON.stringify({ block_all: blockAll }) }),
+  addInstallScriptAllowlist: (pkg, ecosystem, reason = '') =>
+    request('/safety/install-script-allowlist', { method: 'POST', body: JSON.stringify({ package: pkg, ecosystem, reason }) }),
+  removeInstallScriptAllowlist: (id) =>
+    request(`/safety/install-script-allowlist/${id}`, { method: 'DELETE' }),
   getSafetyProposals: (workspaceId) =>
     request(`/safety/proposals${workspaceId ? `?workspace_id=${workspaceId}` : ''}`),
   acceptSafetyProposal: (id, data) =>
@@ -436,6 +471,14 @@ export const api = {
   openNextAccount: (url) => request('/accounts/open-next', { method: 'POST', body: JSON.stringify({ url }) }),
   restartWithAccount: (sessionId, accountId) =>
     request(`/sessions/${sessionId}/restart-with-account`, { method: 'POST', body: JSON.stringify({ account_id: accountId }) }),
+  setupBrowser: (id, cliType) => request(`/accounts/${id}/setup-browser`, {
+    method: 'POST', body: JSON.stringify({ cli_type: cliType || undefined }),
+  }),
+  playwrightAuth: (id, { headless = true, cliType } = {}) =>
+    request(`/accounts/${id}/playwright-auth`, {
+      method: 'POST', body: JSON.stringify({ headless, cli_type: cliType || undefined }),
+    }),
+  getAuthStatus: (id) => request(`/accounts/${id}/auth-status`),
   popOutSession: (sessionId) =>
     request(`/sessions/${sessionId}/pop-out`, { method: 'POST' }),
 
@@ -493,6 +536,55 @@ export const api = {
   exportKnowledgeToConfig: (workspaceId, data) =>
     request(`/workspaces/${workspaceId}/knowledge/export`, { method: 'POST', body: JSON.stringify(data) }),
 
+  // ── Memory entries (Commander-owned) ────────────────────────────
+  listMemoryEntries: (workspaceId, types, sourceCli) => {
+    const params = new URLSearchParams()
+    if (workspaceId) params.set('workspace', workspaceId)
+    if (types) params.set('types', types)
+    if (sourceCli) params.set('source_cli', sourceCli)
+    return request(`/memory?${params}`)
+  },
+  createMemoryEntry: (data) =>
+    request('/memory', { method: 'POST', body: JSON.stringify(data) }),
+  updateMemoryEntry: (id, data) =>
+    request(`/memory/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteMemoryEntry: (id) =>
+    request(`/memory/${id}`, { method: 'DELETE' }),
+  searchMemoryEntries: (query, workspaceId, types) => {
+    const params = new URLSearchParams({ q: query })
+    if (workspaceId) params.set('workspace', workspaceId)
+    if (types) params.set('types', types)
+    return request(`/memory/search?${params}`)
+  },
+  importMemoryFromCli: (workspaceId) =>
+    request('/memory/import', { method: 'POST', body: JSON.stringify({ workspace_id: workspaceId }) }),
+  getMemoryPrompt: (workspaceId) =>
+    request(`/memory/prompt${workspaceId ? '?workspace=' + workspaceId : ''}`),
+
+  // ── Workspace memory sync ─────────────────────────────────────
+  getWorkspaceMemory: (workspaceId) =>
+    request(`/workspaces/${workspaceId}/memory`),
+  updateWorkspaceMemory: (workspaceId, content) =>
+    request(`/workspaces/${workspaceId}/memory`, { method: 'PUT', body: JSON.stringify({ content }) }),
+  syncWorkspaceMemory: (workspaceId, sourceCli) =>
+    request(`/workspaces/${workspaceId}/memory/sync`, {
+      method: 'POST', body: JSON.stringify(sourceCli ? { source_cli: sourceCli } : {})
+    }),
+  getWorkspaceMemoryDiff: (workspaceId) =>
+    request(`/workspaces/${workspaceId}/memory/diff`),
+  resolveWorkspaceMemory: (workspaceId, resolvedContent, pushTo) =>
+    request(`/workspaces/${workspaceId}/memory/resolve`, {
+      method: 'POST', body: JSON.stringify({ resolved_content: resolvedContent, push_to: pushTo })
+    }),
+  getWorkspaceMemorySettings: (workspaceId) =>
+    request(`/workspaces/${workspaceId}/memory/settings`),
+  updateWorkspaceMemorySettings: (workspaceId, settings) =>
+    request(`/workspaces/${workspaceId}/memory/settings`, {
+      method: 'PUT', body: JSON.stringify(settings)
+    }),
+  getWorkspaceAutoMemory: (workspaceId) =>
+    request(`/workspaces/${workspaceId}/memory/auto`),
+
   // ── W2W: Unified memory search ─────────────────────────────────
   searchMemory: (workspaceId, query, types = 'tasks,digests,knowledge,messages,files') => {
     const params = new URLSearchParams({ q: query, types })
@@ -508,4 +600,37 @@ export const api = {
     if (excludeSession) params.set('exclude_session', excludeSession)
     return request(`/sessions/similar?${params}`)
   },
+
+  // ── Observatory ────────────────────────────────────────────────
+  getObservatoryFindings: (params = {}) => {
+    const qs = new URLSearchParams(params).toString()
+    return request(`/observatory/findings${qs ? '?' + qs : ''}`)
+  },
+  updateObservatoryFinding: (id, data) =>
+    request(`/observatory/findings/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteObservatoryFinding: (id) =>
+    request(`/observatory/findings/${id}`, { method: 'DELETE' }),
+  promoteObservatoryFinding: (id, workspaceId) =>
+    request(`/observatory/findings/${id}/promote`, { method: 'POST', body: JSON.stringify({ workspace_id: workspaceId }) }),
+  getObservatoryScans: () => request('/observatory/scans'),
+  triggerObservatoryScan: (data) =>
+    request('/observatory/scan', { method: 'POST', body: JSON.stringify(data) }),
+  getObservatorySettings: (workspaceId) =>
+    request(`/observatory/settings?workspace_id=${workspaceId}`),
+  updateObservatorySettings: (data) =>
+    request('/observatory/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  getObservatoryApiKeys: () => request('/observatory/api-keys'),
+  setObservatoryApiKey: (name, value) =>
+    request('/observatory/api-keys', { method: 'PUT', body: JSON.stringify({ name, value }) }),
+  testObservatoryApiKey: (name) =>
+    request('/observatory/api-keys/test', { method: 'POST', body: JSON.stringify({ name }) }),
+  createObservatorist: (workspaceId) =>
+    request(`/workspaces/${workspaceId}/observatorist`, { method: 'POST' }),
+
+  // ── System API Keys ──────────────────────────────────────────────
+  getApiKeys: () => request('/api-keys'),
+  saveApiKey: (name, value) =>
+    request('/api-keys', { method: 'PUT', body: JSON.stringify({ name, value }) }),
+  testApiKey: (name) =>
+    request('/api-keys/test', { method: 'POST', body: JSON.stringify({ name }) }),
 }

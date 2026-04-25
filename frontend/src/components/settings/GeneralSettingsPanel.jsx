@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Settings, X, RefreshCw, Loader2, LayoutGrid, Columns, Rows, Grid2x2, Monitor, Maximize } from 'lucide-react'
+import { Settings, X, RefreshCw, Loader2, LayoutGrid, Columns, Rows, Grid2x2, Monitor, Maximize, Type } from 'lucide-react'
 import { api } from '../../lib/api'
 import useStore from '../../state/store'
 
@@ -51,8 +51,10 @@ const HOME_COLUMN_OPTIONS = [2, 3, 4, 5]
 
 export default function GeneralSettingsPanel({ onClose }) {
   const [autoUpdateCli, setAutoUpdateCli] = useState(false)
+  const [autoSessionTitles, setAutoSessionTitles] = useState(true)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [savingTitle, setSavingTitle] = useState(false)
 
   const viewMode = useStore((s) => s.viewMode)
   const gridLayout = useStore((s) => s.gridLayout)
@@ -61,10 +63,15 @@ export default function GeneralSettingsPanel({ onClose }) {
   const terminalAutoFit = useStore((s) => s.terminalAutoFit)
 
   useEffect(() => {
-    api.getAppSetting('auto_update_cli').then((res) => {
-      setAutoUpdateCli(res.value === 'on')
-      setLoading(false)
-    }).catch(() => setLoading(false))
+    Promise.all([
+      api.getAppSetting('auto_update_cli').then((res) => {
+        setAutoUpdateCli(res.value === 'on')
+      }).catch(() => {}),
+      api.getAppSetting('auto_session_titles').then((res) => {
+        // Default is on — only disable if explicitly "off"
+        setAutoSessionTitles(res.value !== 'off')
+      }).catch(() => {}),
+    ]).finally(() => setLoading(false))
   }, [])
 
   const handleToggle = async (val) => {
@@ -76,6 +83,17 @@ export default function GeneralSettingsPanel({ onClose }) {
       setAutoUpdateCli(!val)
     }
     setSaving(false)
+  }
+
+  const handleTitleToggle = async (val) => {
+    setAutoSessionTitles(val)
+    setSavingTitle(true)
+    try {
+      await api.setAppSetting('auto_session_titles', val ? 'on' : 'off')
+    } catch (e) {
+      setAutoSessionTitles(!val)
+    }
+    setSavingTitle(false)
   }
 
   return (
@@ -103,8 +121,9 @@ export default function GeneralSettingsPanel({ onClose }) {
         <div className="p-4 space-y-5">
 
           {/* ── Layout ─────────────────────────────── */}
-          <div className="text-[10px] text-text-faint font-medium uppercase tracking-wider">
+          <div className="text-[10px] text-text-faint font-medium uppercase tracking-wider flex items-center gap-2">
             Layout
+            <span className="normal-case tracking-normal text-zinc-400/70 px-1.5 py-0.5 bg-zinc-500/8 rounded border border-zinc-500/15 text-[9px]">This device</span>
           </div>
 
           <div className="space-y-4">
@@ -198,8 +217,9 @@ export default function GeneralSettingsPanel({ onClose }) {
           <div className="border-t border-border-secondary" />
 
           {/* ── Startup ────────────────────────────── */}
-          <div className="text-[10px] text-text-faint font-medium uppercase tracking-wider">
+          <div className="text-[10px] text-text-faint font-medium uppercase tracking-wider flex items-center gap-2">
             Startup
+            <span className="normal-case tracking-normal text-blue-400/70 px-1.5 py-0.5 bg-blue-500/8 rounded border border-blue-500/15 text-[9px]">Global</span>
           </div>
 
           {loading ? (
@@ -222,6 +242,38 @@ export default function GeneralSettingsPanel({ onClose }) {
                   </div>
                 </div>
                 <Toggle value={autoUpdateCli} onChange={handleToggle} />
+              </div>
+            </div>
+          )}
+
+          <div className="border-t border-border-secondary" />
+
+          {/* ── Sessions ──────────────────────────── */}
+          <div className="text-[10px] text-text-faint font-medium uppercase tracking-wider flex items-center gap-2">
+            Sessions
+            <span className="normal-case tracking-normal text-blue-400/70 px-1.5 py-0.5 bg-blue-500/8 rounded border border-blue-500/15 text-[9px]">Global</span>
+          </div>
+
+          {loading ? (
+            <div className="flex items-center gap-2 text-xs text-text-faint">
+              <Loader2 size={12} className="animate-spin" />
+              Loading...
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {/* Auto session titles */}
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <Type size={13} className="text-purple-400 shrink-0" />
+                    <span className="text-xs text-text-primary font-medium">Auto session titles</span>
+                    {savingTitle && <Loader2 size={10} className="animate-spin text-text-faint" />}
+                  </div>
+                  <div className="text-[10px] text-text-faint mt-0.5 ml-[19px]">
+                    Auto-generate a descriptive title after the first response using a cheap LLM call
+                  </div>
+                </div>
+                <Toggle value={autoSessionTitles} onChange={handleTitleToggle} />
               </div>
             </div>
           )}

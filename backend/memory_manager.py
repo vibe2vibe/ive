@@ -53,23 +53,7 @@ class MemoryEntry:
         return d
 
 
-# ─── Frontmatter parser (shared with memory_sync) ───────────────────
-
-def _parse_frontmatter(text: str) -> tuple[dict, str]:
-    if not text.startswith("---"):
-        return {}, text.strip()
-    end = text.find("\n---", 3)
-    if end == -1:
-        return {}, text.strip()
-    header = text[4:end]
-    body = text[end + 4:]
-    meta: dict[str, str] = {}
-    for line in header.split("\n"):
-        line = line.strip()
-        if ":" in line:
-            key, _, val = line.partition(":")
-            meta[key.strip()] = val.strip().strip('"').strip("'")
-    return meta, body.strip()
+from memory_sync import _parse_frontmatter  # shared parser, single source
 
 
 # ─── Memory Manager ─────────────────────────────────────────────────

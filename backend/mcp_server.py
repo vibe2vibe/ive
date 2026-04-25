@@ -236,8 +236,13 @@ def tool_escalate_worker(args: dict) -> str:
 
     # 2. Determine escalation model based on CLI type
     cli_type = session.get("cli_type", "claude")
-    from cli_profiles import get_profile
-    ladder = get_profile(cli_type).model_ladder
+    # Inline model ladders — avoids importing cli_profiles which isn't
+    # bundled in the compiled MCP binary.
+    _MODEL_LADDERS = {
+        "claude": ["haiku", "sonnet", "opus"],
+        "gemini": ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.5-pro"],
+    }
+    ladder = _MODEL_LADDERS.get(cli_type, _MODEL_LADDERS["claude"])
     current_model = session.get("model", ladder[1] if len(ladder) > 1 else ladder[0])
     max_model = ladder[-1]
     if not new_model:
@@ -668,7 +673,68 @@ def tool_request_docs_update(args: dict) -> str:
     return f"Docs update event emitted. Reason: {reason}. No active Documentor session found — event is queued."
 
 
+def tool_search_skills(args: dict) -> str:
+    """Search the skills catalog for relevant agent skills."""
+    query = args.get("query", "")
+    limit = args.get("limit", 5)
+    params = f"?q={urllib.parse.quote(query)}&limit={limit}"
+    result = api_call("GET", f"/skills/search{params}")
+    if isinstance(result, list):
+        lines = []
+        for s in result:
+            score = s.get("score", 0)
+            lines.append(f"- **{s.get('name', '?')}** (match: {int(score * 100)}%) — {s.get('description', '')}")
+        if lines:
+            return "Matching skills:\n" + "\n".join(lines) + "\n\nCall `get_skill_content` with a skill name to load its full instructions."
+        return "No matching skills found."
+    return json.dumps(result, indent=2)
+
+
+def tool_get_skill_content(args: dict) -> str:
+    """Get full SKILL.md instructions for a specific skill."""
+    name = args.get("name", "")
+    params = f"?name={urllib.parse.quote(name)}"
+    result = api_call("GET", f"/skills/content{params}")
+    if isinstance(result, dict) and result.get("content"):
+        return f"# {result.get('name', name)}\n\n{result['content']}"
+    if isinstance(result, dict) and result.get("description"):
+        return f"# {result.get('name', name)}\n\n{result['description']}"
+    if isinstance(result, dict) and result.get("error"):
+        return f"Skill not found: {name}"
+    return json.dumps(result, indent=2)
+
+
 TOOLS = {
+    "search_skills": {
+        "handler": tool_search_skills,
+        "description": (
+            "Search the skills catalog (8000+ skills) for relevant agent skills. "
+            "Returns top matches ranked by relevance. Use this to find skills that can "
+            "help with your current task."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "What you need help with."},
+                "limit": {"type": "integer", "default": 5, "description": "Max results."},
+            },
+            "required": ["query"],
+        },
+    },
+    "get_skill_content": {
+        "handler": tool_get_skill_content,
+        "description": (
+            "Load the full instructions for a specific skill by name. "
+            "Call this after search_skills to get the complete SKILL.md content."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Exact skill name from search_skills results."},
+            },
+            "required": ["name"],
+        },
+    },
     "list_sessions": {
         "handler": tool_list_sessions,
         "description": "List all sessions in the workspace with status and config.",

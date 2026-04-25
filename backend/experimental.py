@@ -266,6 +266,116 @@ EXPERIMENTAL_FEATURES: dict[str, ExperimentalFeature] = {
         category="security",
         added_in="2026-04-16",
     ),
+    "experimental_auto_skill_suggestions": ExperimentalFeature(
+        key="experimental_auto_skill_suggestions",
+        label="Auto Skill Suggestions",
+        description=(
+            "Automatically matches skills from the 8000+ skill catalog to your "
+            "session context using semantic embeddings and injects the top 3 "
+            "as short summaries the agent can discover and load on demand."
+        ),
+        long_description=(
+            "When enabled, Commander embeds the full skills catalog on first use "
+            "(name + description per skill) using BAAI/bge-small-en-v1.5. At "
+            "session start, it matches the session context (name, purpose, system "
+            "prompt) against the index and injects a short summary of the top 3 "
+            "matching skills into the system prompt.\n\n"
+            "The agent sees skill names and descriptions — not full SKILL.md "
+            "content — and can load any skill's full instructions via the "
+            "`search_skills` and `get_skill_content` MCP tools.\n\n"
+            "How it works:\n"
+            "  • First use: background-embeds all 8000+ skills (~20-40s one-time)\n"
+            "  • Session start: finds top 3 skills, injects ~100 token summary\n"
+            "  • MCP tools: agents can search for more skills mid-conversation\n"
+            "  • Skill index is cached in SQLite and memory across restarts\n\n"
+            "The `search_skills` and `get_skill_content` MCP tools are always "
+            "available on both Commander and Worker MCP servers regardless of "
+            "this flag — this toggle only controls the automatic injection "
+            "into the system prompt and the real-time WS suggestions.\n\n"
+            "⚠ Tradeoffs:\n"
+            "  • First embedding run takes ~20-40s (one-time, background)\n"
+            "  • Adds ~100 tokens to the system prompt per session\n"
+            "  • Uses the same embedding model as coordination/advisor\n\n"
+            "Recommended for: discovering useful skills you didn't know existed.\n\n"
+            "Not recommended for: sessions where you want minimal system prompt."
+        ),
+        modifies_prompt=True,
+        default_enabled=False,
+        category="advisor",
+        added_in="2026-04-21",
+    ),
+    "experimental_doom_loop_detection": ExperimentalFeature(
+        key="experimental_doom_loop_detection",
+        label="Doom Loop Detection",
+        description=(
+            "Detects when agents get stuck in repetitive tool call patterns "
+            "(same tool 3+ times, A-B-A-B cycles) and injects corrective guidance "
+            "to break the loop."
+        ),
+        long_description=(
+            "When enabled, Commander tracks the last 30 tool calls per session "
+            "in a sliding window and detects three patterns:\n\n"
+            "  1. Consecutive repeats: same tool with identical input 3+ times\n"
+            "  2. Length-2 cycles: A→B→A→B pattern (two full repetitions)\n"
+            "  3. Length-3 cycles: A→B→C→A→B→C pattern\n\n"
+            "When a pattern is detected, Commander:\n"
+            "  - Broadcasts a doom_loop_warning WebSocket event to the UI\n"
+            "  - Queues a corrective message for delivery to the agent's PTY\n"
+            "    at the next idle, telling it to try a fundamentally different\n"
+            "    approach\n\n"
+            "Warnings are throttled to one per minute per session to avoid\n"
+            "flooding the agent.\n\n"
+            "Also enforces iteration limits on cascade loops (max 50 iterations)\n"
+            "to prevent runaway cascades.\n\n"
+            "⚠ Tradeoffs:\n"
+            "  - Adds minimal overhead (in-memory deque + hash per tool call)\n"
+            "  - The corrective nudge may occasionally interrupt legitimate\n"
+            "    repeated operations (e.g. editing many similar files)\n"
+            "  - Does not affect pipeline runs (they already have max_iterations)\n\n"
+            "Recommended for: long-running autonomous sessions, RALPH mode,\n"
+            "and any workflow where agents run unattended."
+        ),
+        modifies_prompt=False,
+        default_enabled=False,
+        category="hooks",
+        added_in="2026-04-22",
+    ),
+    "experimental_auto_distill": ExperimentalFeature(
+        key="experimental_auto_distill",
+        label="Auto-Distill on Exit",
+        description=(
+            "Automatically extracts reusable artifacts (guidelines, prompts, "
+            "cascades, or memory entries) from sessions when they exit cleanly "
+            "with enough conversation history."
+        ),
+        long_description=(
+            "When enabled, Commander automatically runs the distill system "
+            "when a session exits cleanly (exit code 0) with 5+ conversation "
+            "turns. The artifact type is auto-detected based on conversation "
+            "content:\n\n"
+            "  - Sessions with corrections/feedback → feedback memory entry\n"
+            "  - Multi-step workflows → cascade\n"
+            "  - Convention/pattern discussions → guideline\n"
+            "  - Reusable tasks → prompt template\n\n"
+            "Results appear in the notification inbox like manual distills. "
+            "You can preview and save them as reusable artifacts.\n\n"
+            "Gate conditions (all must be true):\n"
+            "  - Clean exit (exit code 0)\n"
+            "  - 5+ conversation turns\n"
+            "  - Session type is worker or default (not commander/tester)\n"
+            "  - Not a throwaway worktree/branch session\n\n"
+            "⚠ Tradeoffs:\n"
+            "  - Each auto-distill fires a background LLM call (billed normally)\n"
+            "  - Short/trivial sessions may produce low-quality artifacts\n"
+            "  - Results may accumulate in inbox if not reviewed\n\n"
+            "Recommended for: teams that want to passively build up a library "
+            "of guidelines and prompts from their daily work."
+        ),
+        modifies_prompt=False,
+        default_enabled=False,
+        category="advisor",
+        added_in="2026-04-22",
+    ),
     "experimental_myelin_coordination": ExperimentalFeature(
         key="experimental_myelin_coordination",
         label="Myelin Semantic Coordination",
@@ -312,6 +422,48 @@ EXPERIMENTAL_FEATURES: dict[str, ExperimentalFeature] = {
         default_enabled=False,
         category="coordination",
         added_in="2026-04-14",
+    ),
+    "experimental_auto_auth_cycling": ExperimentalFeature(
+        key="experimental_auto_auth_cycling",
+        label="Auto Auth Cycling",
+        description=(
+            "Automatically switches to the next available account when a "
+            "session hits its usage quota, and optionally uses Playwright "
+            "to refresh expired OAuth tokens headlessly."
+        ),
+        long_description=(
+            "When enabled, Commander intercepts quota-exceeded events and "
+            "automatically:\n\n"
+            "  1. Marks the exhausted account with a 4-hour cooldown\n"
+            "  2. Selects the next active account (LRU order)\n"
+            "  3. Stops the current PTY and restarts it with the new account\n"
+            "  4. Shows a notification so you know what happened\n\n"
+            "The session resumes seamlessly on a fresh account with no manual "
+            "intervention required.\n\n"
+            "**Playwright integration (optional)**\n\n"
+            "For OAuth accounts, you can set up a Playwright browser context "
+            "per account via Account Manager → 'Setup browser'. This saves "
+            "your login cookies so Commander can re-authenticate headlessly "
+            "when tokens expire:\n\n"
+            "  • First time: visible browser opens — log in manually once\n"
+            "  • After that: Playwright re-runs `claude auth login` headlessly\n"
+            "    using stored cookies, auto-completing the OAuth flow\n\n"
+            "Accounts without a Playwright context still cycle normally — they "
+            "just can't auto-refresh expired tokens.\n\n"
+            "Tradeoffs:\n"
+            "  • Requires 2+ accounts configured in Account Manager\n"
+            "  • Playwright features require: pip3 install playwright && "
+            "playwright install chromium\n"
+            "  • Session continuity depends on the CLI's --resume capability\n"
+            "  • Browser cookies may expire; re-run 'Setup browser' if headless "
+            "auth starts failing\n\n"
+            "Recommended for: power users with multiple Claude subscriptions "
+            "who want uninterrupted long-running sessions."
+        ),
+        modifies_prompt=False,
+        default_enabled=False,
+        category="accounts",
+        added_in="2026-04-24",
     ),
 }
 

@@ -19,6 +19,8 @@
 
 ## What is IVE?
 
+**Run 10 Claude Code sessions at once — without losing your mind or your API budget.**
+
 IVE is a local web app that turns your browser into a **command center for AI coding agents**. Instead of juggling separate terminal windows, you manage dozens of Claude Code and Gemini CLI sessions from a single UI — with orchestration, task management, deep research, and multi-agent pipelines built in.
 
 Every session is a **real pseudo-terminal**. Shift+Tab, plan mode, slash commands, interactive prompts — everything works exactly like the native CLI. IVE just gives you superpowers on top.

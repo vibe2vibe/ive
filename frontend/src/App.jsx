@@ -21,18 +21,19 @@ import SafetyPanel from './components/settings/SafetyPanel'
 import SoundSettingsPanel from './components/settings/SoundSettingsPanel'
 import GeneralSettingsPanel from './components/settings/GeneralSettingsPanel'
 import WorkspaceSettingsPanel from './components/settings/WorkspaceSettingsPanel'
+import ApiKeysPanel from './components/settings/ApiKeysPanel'
 import BroadcastBar from './components/chat/BroadcastBar'
 import HistoryImport from './components/session/HistoryImport'
 import InboxPanel from './components/session/Inbox'
 import PlanViewer from './components/session/PlanViewer'
 import FeatureBoard from './components/board/FeatureBoard'
+import ResearchHub from './components/session/ResearchHub'
 import PipelineEditor from './components/pipeline/PipelineEditor'
 import QuickFeatureModal from './components/board/QuickFeatureModal'
 import SubagentTree from './components/session/SubagentTree'
 import TemplateManager from './components/command/TemplateManager'
 import AccountManager from './components/command/AccountManager'
 import ConfigViewer from './components/session/ConfigViewer'
-import ResearchPanel from './components/session/ResearchPanel'
 import DocsPanel from './components/session/DocsPanel'
 import KnowledgePanel from './components/session/KnowledgePanel'
 import PeerMessagesPanel from './components/session/PeerMessagesPanel'
@@ -53,9 +54,35 @@ import QuickActionPalette from './components/command/QuickActionPalette'
 import CascadeBar from './components/chat/CascadeBar'
 import CascadeVariableDialog from './components/prompts/CascadeVariableDialog'
 import NotificationToast from './components/layout/NotificationToast'
+import ErrorBoundary from './components/ErrorBoundary'
 import useStore from './state/store'
 import { api } from './lib/api'
 import { typeInTerminal, sendTerminalCommand } from './lib/terminal'
+
+/** Lightweight error boundary for panels — dismisses on close instead of full reload. */
+function PanelBoundary({ onClose, children }) {
+  return (
+    <PanelBoundaryInner onClose={onClose}>
+      {children}
+    </PanelBoundaryInner>
+  )
+}
+class PanelBoundaryInner extends ErrorBoundary {
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={this.props.onClose}>
+          <div className="bg-bg-primary border border-border-primary rounded-lg p-6 max-w-sm text-center" onClick={(e) => e.stopPropagation()}>
+            <p className="text-[11px] text-red-400 font-mono mb-2">Panel crashed</p>
+            <pre className="text-[10px] text-zinc-500 font-mono mb-3 max-h-20 overflow-auto">{this.state.error?.message}</pre>
+            <button onClick={this.props.onClose} className="px-3 py-1 text-[11px] font-mono bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded">dismiss</button>
+          </div>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 import { getWorkspaceColor } from './lib/constants'
 
 export default function App() {
@@ -65,11 +92,14 @@ export default function App() {
   useEffect(() => {
     const handler = (e) => {
       const panel = e.detail
+      // Scratchpad is inline (toggleable), all others are exclusive overlays
+      if (panel === 'scratchpad') { setShowScratchpad((s) => !s); return }
+      closeExclusivePanels()
       if (panel === 'feature-board') setShowBoard(true)
+      if (panel === 'observatory') { setResearchHubTab('feed'); setShowResearchHub(true) }
       if (panel === 'pipeline-editor') setShowPipelineEditor(true)
       if (panel === 'agent-tree') setShowTree(true)
-      if (panel === 'scratchpad') setShowScratchpad((s) => !s)
-      if (panel === 'research') setShowResearch(true)
+      if (panel === 'research') { setResearchHubTab('library'); setShowResearchHub(true) }
       if (panel === 'docs-panel') setShowDocs(true)
       if (panel === 'knowledge') setShowKnowledge(true)
       if (panel === 'peer-messages') setShowPeerMessages(true)
@@ -89,28 +119,38 @@ export default function App() {
       if (panel === 'general-settings') setShowGeneralSettings(true)
       if (panel === 'sound-settings') setShowSoundSettings(true)
       if (panel === 'experimental') setShowExperimental(true)
+      if (panel === 'api-keys') setShowApiKeys(true)
       if (panel === 'prompts') setShowPrompts(true)
       if (panel === 'search') setShowSearch(true)
     }
     const wsSettingsHandler = (e) => {
+      closeExclusivePanels()
       setWsSettingsInitialId(e.detail?.workspaceId || null)
       setShowWorkspaceSettings(true)
     }
-    const planHandler = () => setShowPlan(true)
+    const planHandler = () => { closeExclusivePanels(); setShowPlan(true) }
     const quickFeatureHandler = (e) => {
+      closeExclusivePanels()
       setQuickFeaturePrefill(e.detail?.text || '')
       setQuickFeatureVoice(false)
       setShowQuickFeature(true)
+    }
+    const memoryConflictHandler = (e) => {
+      closeExclusivePanels()
+      setWsSettingsInitialId(e.detail?.workspaceId || null)
+      setShowWorkspaceSettings(true)
     }
     window.addEventListener('open-panel', handler)
     window.addEventListener('open-plan-viewer', planHandler)
     window.addEventListener('open-quick-feature', quickFeatureHandler)
     window.addEventListener('open-workspace-settings', wsSettingsHandler)
+    window.addEventListener('open-memory-conflict', memoryConflictHandler)
     return () => {
       window.removeEventListener('open-panel', handler)
       window.removeEventListener('open-plan-viewer', planHandler)
       window.removeEventListener('open-quick-feature', quickFeatureHandler)
       window.removeEventListener('open-workspace-settings', wsSettingsHandler)
+      window.removeEventListener('open-memory-conflict', memoryConflictHandler)
     }
   }, [])
 
@@ -173,31 +213,48 @@ export default function App() {
         })
       }
     }
+    const handleSkillSuggestion = (e) => {
+      const { session_id, skills, index_building } = e.detail
+      if (skills?.length > 0) {
+        const existing = useStore.getState().notifications
+        if (existing.some((n) => n.type === 'skill_suggestion' && n.sessionId === session_id)) return
+        useStore.getState().addNotification({
+          type: 'skill_suggestion',
+          message: `${skills.length} skill${skills.length > 1 ? 's' : ''} suggested`,
+          sessionId: session_id,
+          skills,
+          indexBuilding: !!index_building,
+        })
+      }
+    }
     window.addEventListener('cc-distill_done', handleDistillDone)
     window.addEventListener('cc-distill_error', handleDistillError)
     window.addEventListener('cc-mcp_parse_done', handleMcpParseDone)
     window.addEventListener('cc-mcp_parse_error', handleMcpParseError)
     window.addEventListener('cc-guideline_recommendation', handleGuidelineRec)
+    window.addEventListener('cc-skill_suggestion', handleSkillSuggestion)
     return () => {
       window.removeEventListener('cc-distill_done', handleDistillDone)
       window.removeEventListener('cc-distill_error', handleDistillError)
       window.removeEventListener('cc-mcp_parse_done', handleMcpParseDone)
       window.removeEventListener('cc-mcp_parse_error', handleMcpParseError)
       window.removeEventListener('cc-guideline_recommendation', handleGuidelineRec)
+      window.removeEventListener('cc-skill_suggestion', handleSkillSuggestion)
     }
   }, [])
 
   // Open result panels from notification action buttons
   useEffect(() => {
     const handleOpenDistillResult = (e) => {
+      closeExclusivePanels()
       setDistillInitial({ result: e.detail.result, artifactType: e.detail.artifactType })
       setShowDistill(true)
     }
     const handleOpenMcpResult = (e) => {
-      // Open MCP panel — the result is in backgroundResults for the panel to consume
+      closeExclusivePanels()
       setShowMcpServers(true)
     }
-    const handleOpenGuidelines = () => setShowGuidelines(true)
+    const handleOpenGuidelines = () => { closeExclusivePanels(); setShowGuidelines(true) }
     window.addEventListener('open-distill-result', handleOpenDistillResult)
     window.addEventListener('open-mcp-parse-result', handleOpenMcpResult)
     window.addEventListener('open-guidelines', handleOpenGuidelines)
@@ -247,6 +304,7 @@ export default function App() {
   // Refit all terminals when the view or layout changes — covers workspace
   // switches (different visibleTabs), tab open/close (cell count change),
   // layout mode changes, view mode switches, and split mode toggles.
+  // Also fires when terminals become visible again (showHome flips to false).
   // Fires twice: once at 80ms for layout-only changes (grid layout switch),
   // and again at 350ms as a safety net for view switches that remount
   // terminals (tabs↔grid) — the remount path needs ~300ms to settle.
@@ -256,11 +314,16 @@ export default function App() {
     const refit = () => window.dispatchEvent(new Event('cc-terminal-refit'))
     requestAnimationFrame(() => {
       if (cancelled) return
+      refit()
       setTimeout(() => { if (!cancelled) refit() }, 80)
       setTimeout(() => { if (!cancelled) refit() }, 350)
+      // Third pass for heavy transitions (showHome toggle remounts all
+      // terminals, custom template switches, etc.) where layout needs
+      // more time to settle before proposeDimensions gets real values.
+      setTimeout(() => { if (!cancelled) refit() }, 700)
     })
     return () => { cancelled = true }
-  }, [viewMode, visibleTabCount, activeWorkspaceId, gridLayout, activeGridTemplateId, splitMode, splitSessionId])
+  }, [viewMode, visibleTabCount, activeWorkspaceId, activeSessionId, gridLayout, activeGridTemplateId, splitMode, splitSessionId, showHome])
 
   const [showCommand, setShowCommand] = useState(false)
   const [showPrompts, setShowPrompts] = useState(false)
@@ -279,7 +342,8 @@ export default function App() {
   const [showTemplates, setShowTemplates] = useState(false)
   const [showAccounts, setShowAccounts] = useState(false)
   const [showConfig, setShowConfig] = useState(false)
-  const [showResearch, setShowResearch] = useState(false)
+  const [showResearchHub, setShowResearchHub] = useState(false)
+  const [researchHubTab, setResearchHubTab] = useState('library')
   const [showDocs, setShowDocs] = useState(false)
   const [showKnowledge, setShowKnowledge] = useState(false)
   const [showPeerMessages, setShowPeerMessages] = useState(false)
@@ -296,10 +360,12 @@ export default function App() {
   const [showQuickActionPalette, setShowQuickActionPalette] = useState(false)
   const [showExperimental, setShowExperimental] = useState(false)
   const [showSafety, setShowSafety] = useState(false)
+  // Observatory merged into ResearchHub (Feed tab)
   const [promptsStartTab, setPromptsStartTab] = useState('prompts')
   const [showSoundSettings, setShowSoundSettings] = useState(false)
   const [showGeneralSettings, setShowGeneralSettings] = useState(false)
   const [showWorkspaceSettings, setShowWorkspaceSettings] = useState(false)
+  const [showApiKeys, setShowApiKeys] = useState(false)
   const [wsSettingsInitialId, setWsSettingsInitialId] = useState(null)
   const [showCodeReview, setShowCodeReview] = useState(false)
   const [showAnnotator, setShowAnnotator] = useState(false)
@@ -311,60 +377,109 @@ export default function App() {
   const [composerDraft, setComposerDraft] = useState('') // pre-filled from annotator
   const [screenshotData, setScreenshotData] = useState(null) // { imageUrl, sourceUrl }
 
+  // Close all exclusive modal/overlay panels. Called before opening a new panel
+  // to enforce mutual exclusion — only one overlay at a time. Inline panels
+  // (Composer, Scratchpad, CascadeBar) are excluded since they coexist with modals.
+  const closeExclusivePanels = useCallback(() => {
+    setShowCommand(false)
+    setShowPrompts(false); setPromptsStartCreate(false); setPromptsStartTab('prompts')
+    setShowGuidelines(false)
+    setShowMcpServers(false)
+    setShowBroadcast(false)
+    setShowSearch(false)
+    setShowMission(false)
+    setShowHistory(false)
+    setShowInbox(false)
+    setShowPlan(false)
+    setShowBoard(false)
+    setShowPipelineEditor(false)
+    setShowTree(false)
+    setShowTemplates(false)
+    setShowAccounts(false)
+    setShowConfig(false)
+    setShowResearchHub(false)
+    setShowDocs(false)
+    setShowKnowledge(false)
+    setShowPeerMessages(false)
+    setShowMemory(false)
+    setShowShortcuts(false)
+    setShowMarketplace(false); setMarketplaceTab(null)
+    setShowQuickActionPalette(false)
+    setShowExperimental(false)
+    setShowSafety(false)
+    setShowSoundSettings(false)
+    setShowGeneralSettings(false)
+    setShowWorkspaceSettings(false)
+    setShowApiKeys(false)
+    setShowCodeReview(false)
+    setShowDistill(false); setDistillInitial(null)
+    setShowAnnotator(false)
+    setShowGridEditor(false)
+    setShowPreviewPalette(false)
+    setShowQuickFeature(false); setQuickFeaturePrefill(''); setQuickFeatureVoice(false)
+  }, [])
+
   // Global Escape to close any open panel.
   // Uses capture phase so the event fires before xterm.js or other element
   // handlers can swallow it. stopPropagation prevents the Escape from also
   // reaching the terminal after closing a panel.
   useEffect(() => {
     const handler = (e) => {
-      if (e.key === 'Escape') {
-        // Close panels in priority order (topmost first)
-        if (showDistill) { e.stopPropagation(); setShowDistill(false); return }
-        if (showQuickFeature) { e.stopPropagation(); setShowQuickFeature(false); setQuickFeaturePrefill(''); setQuickFeatureVoice(false); return }
-        if (showAnnotator) { e.stopPropagation(); setShowAnnotator(false); return }
-        if (screenshotData) { e.stopPropagation(); setScreenshotData(null); return }
-        if (livePreviewUrl) { e.stopPropagation(); setLivePreviewUrl(null); return }
-        if (showPreviewPalette) { e.stopPropagation(); setShowPreviewPalette(false); return }
-        if (showCommand) { e.stopPropagation(); setShowCommand(false); return }
-        if (showPrompts) { e.stopPropagation(); setShowPrompts(false); return }
-        if (showGuidelines) { e.stopPropagation(); setShowGuidelines(false); return }
-        if (showMcpServers) { e.stopPropagation(); setShowMcpServers(false); return }
-        if (showBroadcast) { e.stopPropagation(); setShowBroadcast(false); return }
-        if (showSearch) { e.stopPropagation(); setShowSearch(false); return }
-        if (showMission) { e.stopPropagation(); setShowMission(false); return }
-        if (showHistory) { e.stopPropagation(); setShowHistory(false); return }
-        if (showInbox) { e.stopPropagation(); setShowInbox(false); return }
-        if (showPlan) { e.stopPropagation(); setShowPlan(false); return }
-        if (showBoard) { e.stopPropagation(); setShowBoard(false); return }
-        if (showPipelineEditor) { e.stopPropagation(); setShowPipelineEditor(false); return }
-        if (showTree) { e.stopPropagation(); setShowTree(false); return }
-        if (showTemplates) { e.stopPropagation(); setShowTemplates(false); return }
-        if (showShortcuts) { e.stopPropagation(); setShowShortcuts(false); return }
-        if (showAccounts) { e.stopPropagation(); setShowAccounts(false); return }
-        if (showResearch) { e.stopPropagation(); setShowResearch(false); return }
-        if (showDocs) { e.stopPropagation(); setShowDocs(false); return }
-        if (showKnowledge) { e.stopPropagation(); setShowKnowledge(false); return }
-        if (showPeerMessages) { e.stopPropagation(); setShowPeerMessages(false); return }
-        if (showMemory) { e.stopPropagation(); setShowMemory(false); return }
-        if (showScratchpad) { e.stopPropagation(); setShowScratchpad(false); return }
-        if (showMarketplace) { e.stopPropagation(); setShowMarketplace(false); return }
-        if (showQuickActionPalette) { e.stopPropagation(); setShowQuickActionPalette(false); return }
-        if (showExperimental) { e.stopPropagation(); setShowExperimental(false); return }
-        if (showSoundSettings) { e.stopPropagation(); setShowSoundSettings(false); return }
-        if (showGeneralSettings) { e.stopPropagation(); setShowGeneralSettings(false); return }
-        if (showWorkspaceSettings) { e.stopPropagation(); setShowWorkspaceSettings(false); return }
-        if (showCodeReview) { e.stopPropagation(); setShowCodeReview(false); return }
-        if (splitMode) { e.stopPropagation(); useStore.setState({ splitMode: false, splitSessionId: null }); return }
+      if (e.key !== 'Escape') return
+      // Ordered by priority: layered panels first, then exclusive panels, then inline
+      const escapeStack = [
+        [showDistill, () => { setShowDistill(false); setDistillInitial(null) }],
+        [showQuickFeature, () => { setShowQuickFeature(false); setQuickFeaturePrefill(''); setQuickFeatureVoice(false) }],
+        [showAnnotator, () => setShowAnnotator(false)],
+        [screenshotData, () => setScreenshotData(null)],
+        [livePreviewUrl, () => setLivePreviewUrl(null)],
+        [showPreviewPalette, () => setShowPreviewPalette(false)],
+        [showCommand, () => setShowCommand(false)],
+        [showPrompts, () => { setShowPrompts(false); setPromptsStartCreate(false); setPromptsStartTab('prompts') }],
+        [showGuidelines, () => setShowGuidelines(false)],
+        [showMcpServers, () => setShowMcpServers(false)],
+        [showBroadcast, () => setShowBroadcast(false)],
+        [showSearch, () => setShowSearch(false)],
+        [showMission, () => setShowMission(false)],
+        [showHistory, () => setShowHistory(false)],
+        [showInbox, () => setShowInbox(false)],
+        [showPlan, () => setShowPlan(false)],
+        [showBoard, () => setShowBoard(false)],
+        [showPipelineEditor, () => setShowPipelineEditor(false)],
+        [showTree, () => setShowTree(false)],
+        [showTemplates, () => setShowTemplates(false)],
+        [showShortcuts, () => setShowShortcuts(false)],
+        [showAccounts, () => setShowAccounts(false)],
+        [showResearchHub, () => setShowResearchHub(false)],
+        [showDocs, () => setShowDocs(false)],
+        [showKnowledge, () => setShowKnowledge(false)],
+        [showPeerMessages, () => setShowPeerMessages(false)],
+        [showMemory, () => setShowMemory(false)],
+        [showMarketplace, () => { setShowMarketplace(false); setMarketplaceTab(null) }],
+        [showQuickActionPalette, () => setShowQuickActionPalette(false)],
+        [showExperimental, () => setShowExperimental(false)],
+        [showSafety, () => setShowSafety(false)],
+        [showSoundSettings, () => setShowSoundSettings(false)],
+        [showGeneralSettings, () => setShowGeneralSettings(false)],
+        [showWorkspaceSettings, () => setShowWorkspaceSettings(false)],
+        [showApiKeys, () => setShowApiKeys(false)],
+        [showCodeReview, () => setShowCodeReview(false)],
+        [showGridEditor, () => setShowGridEditor(false)],
+        [showScratchpad, () => setShowScratchpad(false)],
+        [splitMode, () => useStore.setState({ splitMode: false, splitSessionId: null })],
+      ]
+      for (const [isOpen, close] of escapeStack) {
+        if (isOpen) { e.stopPropagation(); close(); return }
       }
     }
     window.addEventListener('keydown', handler, true)
     return () => window.removeEventListener('keydown', handler, true)
-  }, [showDistill, showQuickFeature, showAnnotator, screenshotData, livePreviewUrl, showPreviewPalette, showCommand, showPrompts, showGuidelines, showMcpServers, showBroadcast, showSearch, showMission, showHistory, showInbox, showPlan, showBoard, showPipelineEditor, showTree, showTemplates, showScratchpad, showAccounts, showShortcuts, showResearch, showCodeReview, showMarketplace, showQuickActionPalette, showExperimental, showSoundSettings, showGeneralSettings, showWorkspaceSettings, splitMode])
+  }, [showDistill, showQuickFeature, showAnnotator, screenshotData, livePreviewUrl, showPreviewPalette, showCommand, showPrompts, showGuidelines, showMcpServers, showBroadcast, showSearch, showMission, showHistory, showInbox, showPlan, showBoard, showPipelineEditor, showTree, showTemplates, showScratchpad, showAccounts, showShortcuts, showResearchHub, showCodeReview, showMarketplace, showQuickActionPalette, showExperimental, showSafety, showSoundSettings, showGeneralSettings, showWorkspaceSettings, showApiKeys, showGridEditor, splitMode])
 
   // When a modal overlay opens, pull focus away from the terminal so that
   // keyboard events (arrows, Enter, etc.) reach panel handlers instead of
   // being consumed by xterm.js.
-  const anyModalOpen = showDistill || showQuickFeature || showAnnotator || showCommand || showPrompts || showGuidelines || showMcpServers || showBroadcast || showSearch || showMission || showHistory || showInbox || showPlan || showBoard || showTree || showTemplates || showShortcuts || showAccounts || showResearch || showCodeReview || showGridEditor || showPreviewPalette || !!livePreviewUrl || showMarketplace || showQuickActionPalette || showExperimental || showSoundSettings || showGeneralSettings || !!screenshotData
+  const anyModalOpen = showDistill || showQuickFeature || showAnnotator || showCommand || showPrompts || showGuidelines || showMcpServers || showBroadcast || showSearch || showMission || showHistory || showInbox || showPlan || showBoard || showTree || showTemplates || showShortcuts || showAccounts || showResearchHub || showCodeReview || showGridEditor || showPreviewPalette || !!livePreviewUrl || showMarketplace || showQuickActionPalette || showExperimental || showSoundSettings || showGeneralSettings || showApiKeys || !!screenshotData
   useEffect(() => {
     if (anyModalOpen) {
       const active = document.activeElement
@@ -412,84 +527,40 @@ export default function App() {
   }, [])
 
   useKeyboard({
-    onCommandPalette: () => setShowCommand(true),
-    onPromptPalette: () => setShowPrompts(true),
-    onGuidelinePanel: () => setShowGuidelines(true),
-    onMcpServers: () => setShowMcpServers(true),
+    onCommandPalette: () => { closeExclusivePanels(); setShowCommand(true) },
+    onPromptPalette: () => { closeExclusivePanels(); setShowPrompts(true) },
+    onGuidelinePanel: () => { closeExclusivePanels(); setShowGuidelines(true) },
+    onMcpServers: () => { closeExclusivePanels(); setShowMcpServers(true) },
     onSplitView: toggleSplitView,
-    onBroadcast: () => setShowBroadcast(true),
-    onSearch: () => setShowSearch(true),
-    onMissionControl: () => setShowMission(true),
-    onInbox: () => setShowInbox(true),
-    onFeatureBoard: () => setShowBoard(true),
-    onPipelineEditor: () => setShowPipelineEditor(true),
-    onAgentTree: () => setShowTree(true),
-    onResearch: () => { if (!livePreviewUrl) setShowResearch(true) },
+    onBroadcast: () => { closeExclusivePanels(); setShowBroadcast(true) },
+    onSearch: () => { closeExclusivePanels(); setShowSearch(true) },
+    onMissionControl: () => { closeExclusivePanels(); setShowMission(true) },
+    onInbox: () => { closeExclusivePanels(); setShowInbox(true) },
+    onFeatureBoard: () => { closeExclusivePanels(); setShowBoard(true) },
+    onPipelineEditor: () => { closeExclusivePanels(); setShowPipelineEditor(true) },
+    onAgentTree: () => { closeExclusivePanels(); setShowTree(true) },
+    onResearch: () => { if (!livePreviewUrl) { closeExclusivePanels(); setResearchHubTab('library'); setShowResearchHub(true) } },
     onScratchpad: () => setShowScratchpad((s) => !s),
     onComposer: () => setShowComposer((s) => !s),
-    onShortcuts: () => setShowShortcuts(true),
-    onPreview: () => setShowPreviewPalette(true),
-    onMarketplace: () => setShowMarketplace(true),
-    onQuickActionPalette: () => setShowQuickActionPalette(true),
-    onSkillsLibrary: () => { setShowMarketplace(true); setMarketplaceTab('skills') },
-    onCodeReview: () => setShowCodeReview(true),
-    onAnnotate: () => setShowAnnotator(true),
-    onQuickFeature: () => { setQuickFeaturePrefill(''); setQuickFeatureVoice(false); setShowQuickFeature(true) },
+    onShortcuts: () => { closeExclusivePanels(); setShowShortcuts(true) },
+    onPreview: () => { closeExclusivePanels(); setShowPreviewPalette(true) },
+    onMarketplace: () => { closeExclusivePanels(); setShowMarketplace(true) },
+    onQuickActionPalette: () => { closeExclusivePanels(); setShowQuickActionPalette(true) },
+    onSkillsLibrary: () => { closeExclusivePanels(); setShowMarketplace(true); setMarketplaceTab('skills') },
+    onCodeReview: () => { closeExclusivePanels(); setShowCodeReview(true) },
+    onAnnotate: () => { closeExclusivePanels(); setShowAnnotator(true) },
+    onQuickFeature: () => { closeExclusivePanels(); setQuickFeaturePrefill(''); setQuickFeatureVoice(false); setShowQuickFeature(true) },
+    onObservatory: () => { closeExclusivePanels(); setResearchHubTab('feed'); setShowResearchHub(true) },
   })
 
-  const handleCommandAction = (action) => {
-    if (action === 'prompt-library') { setPromptsStartCreate(false); setShowPrompts(true) }
-    if (action === 'new-prompt') { setPromptsStartCreate(true); setShowPrompts(true) }
-    if (action === 'guidelines') setShowGuidelines(true)
-    if (action === 'mcp-servers') setShowMcpServers(true)
-    if (action === 'broadcast') setShowBroadcast(true)
-    if (action === 'search') setShowSearch(true)
-    if (action === 'mission-control') setShowMission(true)
-    if (action === 'import-history') setShowHistory(true)
-    if (action === 'inbox') setShowInbox(true)
-    if (action === 'plan-viewer') setShowPlan(true)
-    if (action === 'feature-board') setShowBoard(true)
-    if (action === 'pipeline-editor') setShowPipelineEditor(true)
-    if (action === 'agent-tree') setShowTree(true)
-    if (action === 'manage-templates') setShowTemplates(true)
-    if (action === 'accounts') setShowAccounts(true)
-    if (action === 'config-viewer') setShowConfig(true)
-    if (action === 'research') setShowResearch(true)
-    if (action === 'docs-panel') setShowDocs(true)
-    if (action === 'knowledge') setShowKnowledge(true)
-    if (action === 'peer-messages') setShowPeerMessages(true)
-    if (action === 'memory-search') setShowMemory(true)
-    if (action === 'shortcuts') setShowShortcuts(true)
-    if (action === 'scratchpad') setShowScratchpad((s) => !s)
-    if (action === 'split-view') toggleSplitView()
-    if (action === 'preview') setShowPreviewPalette(true)
-    if (action === 'marketplace') { setMarketplaceTab(null); setShowMarketplace(true) }
-    if (action === 'quick-actions') setShowQuickActionPalette(true)
-    if (action === 'skills-library') { setMarketplaceTab('skills'); setShowMarketplace(true) }
-    if (action === 'experimental') setShowExperimental(true)
-    if (action === 'safety') setShowSafety(true)
-    if (action === 'cascades') { setPromptsStartTab('cascades'); setShowPrompts(true) }
-    if (action === 'general-settings') setShowGeneralSettings(true)
-    if (action === 'sound-settings') setShowSoundSettings(true)
-    if (action === 'workspace-settings') { setWsSettingsInitialId(useStore.getState().activeWorkspaceId); setShowWorkspaceSettings(true) }
-    if (action === 'add-workspace') {
-      api.browseFolder().then(({ path }) => {
-        if (path) api.createWorkspace(path).then((ws) => {
-          const store = useStore.getState()
-          store.setWorkspaces([...store.workspaces, ws])
-          store.setActiveWorkspace(ws.id)
-        })
-      }).catch(() => {})
-    }
-    if (action === 'grid-layout-editor') setShowGridEditor(true)
-    if (action === 'code-review') setShowCodeReview(true)
-    if (action === 'annotate') setShowAnnotator(true)
-    if (action === 'distill-session') setShowDistill(true)
-    if (action === 'quick-feature') { setQuickFeaturePrefill(''); setQuickFeatureVoice(false); setShowQuickFeature(true) }
-  }
-
-  const executeHomeAction = useCallback((actionId) => {
-    // Panel openers
+  // Single source of truth for opening panels — used by command palette,
+  // home screen, keyboard shortcuts, and sidebar event handlers.
+  const panelActions = useCallback((action) => {
+    // Inline toggles (not exclusive overlays)
+    if (action === 'scratchpad') { setShowScratchpad((s) => !s); return true }
+    if (action === 'split-view') { toggleSplitView(); return true }
+    if (action === 'toggle-sidebar') { useStore.setState((s) => ({ sidebarVisible: !s.sidebarVisible })); return true }
+    // Panel openers — close any open panel first
     const panels = {
       'prompt-library': () => { setPromptsStartCreate(false); setShowPrompts(true) },
       'new-prompt': () => { setPromptsStartCreate(true); setShowPrompts(true) },
@@ -502,29 +573,29 @@ export default function App() {
       'inbox': () => setShowInbox(true),
       'plan-viewer': () => setShowPlan(true),
       'feature-board': () => setShowBoard(true),
+      'observatory': () => { setResearchHubTab('feed'); setShowResearchHub(true) },
       'pipeline-editor': () => setShowPipelineEditor(true),
       'agent-tree': () => setShowTree(true),
       'manage-templates': () => setShowTemplates(true),
       'accounts': () => setShowAccounts(true),
       'config-viewer': () => setShowConfig(true),
-      'research': () => setShowResearch(true),
+      'research': () => { setResearchHubTab('library'); setShowResearchHub(true) },
       'docs-panel': () => setShowDocs(true),
       'knowledge': () => setShowKnowledge(true),
       'peer-messages': () => setShowPeerMessages(true),
       'memory-search': () => setShowMemory(true),
       'shortcuts': () => setShowShortcuts(true),
-      'scratchpad': () => setShowScratchpad((s) => !s),
-      'split-view': () => toggleSplitView(),
       'preview': () => setShowPreviewPalette(true),
       'marketplace': () => { setMarketplaceTab(null); setShowMarketplace(true) },
-      'skills-library': () => { setMarketplaceTab('skills'); setShowMarketplace(true) },
       'quick-actions': () => setShowQuickActionPalette(true),
+      'skills-library': () => { setMarketplaceTab('skills'); setShowMarketplace(true) },
       'experimental': () => setShowExperimental(true),
       'safety': () => setShowSafety(true),
       'cascades': () => { setPromptsStartTab('cascades'); setShowPrompts(true) },
       'general-settings': () => setShowGeneralSettings(true),
       'sound-settings': () => setShowSoundSettings(true),
       'workspace-settings': () => { setWsSettingsInitialId(useStore.getState().activeWorkspaceId); setShowWorkspaceSettings(true) },
+      'api-keys': () => setShowApiKeys(true),
       'add-workspace': () => {
         api.browseFolder().then(({ path }) => {
           if (path) api.createWorkspace(path).then((ws) => {
@@ -534,12 +605,22 @@ export default function App() {
           })
         }).catch(() => {})
       },
+      'grid-layout-editor': () => setShowGridEditor(true),
       'code-review': () => setShowCodeReview(true),
       'annotate': () => setShowAnnotator(true),
+      'distill-session': () => setShowDistill(true),
       'quick-feature': () => { setQuickFeaturePrefill(''); setQuickFeatureVoice(false); setShowQuickFeature(true) },
-      'toggle-sidebar': () => useStore.setState((s) => ({ sidebarVisible: !s.sidebarVisible })),
     }
-    if (panels[actionId]) { panels[actionId](); return }
+    if (panels[action]) { closeExclusivePanels(); panels[action](); return true }
+    return false
+  }, [toggleSplitView, closeExclusivePanels])
+
+  const handleCommandAction = (action) => {
+    panelActions(action)
+  }
+
+  const executeHomeAction = useCallback((actionId) => {
+    if (panelActions(actionId)) return
 
     const store = useStore.getState()
     switch (actionId) {
@@ -1088,13 +1169,14 @@ export default function App() {
       {showHistory && <HistoryImport onClose={() => setShowHistory(false)} />}
       {showInbox && <InboxPanel onClose={() => setShowInbox(false)} />}
       {showPlan && <PlanViewer onClose={() => setShowPlan(false)} />}
-      {showBoard && <FeatureBoard onClose={() => setShowBoard(false)} />}
-      {showPipelineEditor && <PipelineEditor onClose={() => setShowPipelineEditor(false)} />}
+      {showBoard && <PanelBoundary onClose={() => setShowBoard(false)}><FeatureBoard onClose={() => setShowBoard(false)} /></PanelBoundary>}
+      {/* Observatory merged into ResearchHub */}
+      {showPipelineEditor && <PanelBoundary onClose={() => setShowPipelineEditor(false)}><PipelineEditor onClose={() => setShowPipelineEditor(false)} /></PanelBoundary>}
       {showTree && <SubagentTree onClose={() => setShowTree(false)} />}
       {showTemplates && <TemplateManager onClose={() => setShowTemplates(false)} />}
       {showAccounts && <AccountManager onClose={() => setShowAccounts(false)} />}
       {showConfig && <ConfigViewer onClose={() => setShowConfig(false)} />}
-      {showResearch && <ResearchPanel onClose={() => setShowResearch(false)} />}
+      {showResearchHub && <PanelBoundary onClose={() => setShowResearchHub(false)}><ResearchHub initialTab={researchHubTab} onClose={() => setShowResearchHub(false)} /></PanelBoundary>}
       {showDocs && <DocsPanel onClose={() => setShowDocs(false)} />}
       {showKnowledge && <KnowledgePanel onClose={() => setShowKnowledge(false)} />}
       {showPeerMessages && <PeerMessagesPanel onClose={() => setShowPeerMessages(false)} />}
@@ -1107,6 +1189,7 @@ export default function App() {
       {showSoundSettings && <SoundSettingsPanel onClose={() => setShowSoundSettings(false)} />}
       {showGeneralSettings && <GeneralSettingsPanel onClose={() => setShowGeneralSettings(false)} />}
       {showWorkspaceSettings && <WorkspaceSettingsPanel onClose={() => setShowWorkspaceSettings(false)} initialWorkspaceId={wsSettingsInitialId} />}
+      {showApiKeys && <ApiKeysPanel onClose={() => setShowApiKeys(false)} />}
       {showCodeReview && <CodeReviewPanel onClose={() => setShowCodeReview(false)} />}
       {showDistill && (
         <DistillPanel
