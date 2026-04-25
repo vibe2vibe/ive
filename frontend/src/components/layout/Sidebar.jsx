@@ -1524,6 +1524,7 @@ export default function Sidebar() {
                     if (wsId) {
                       try {
                         const s = await api.startCommander(wsId, { cli_type: opt.cli, model: opt.model })
+                        useStore.getState().setActiveWorkspace(s.workspace_id)
                         useStore.getState().addSession(s)
                       } catch (e) { console.error(e); useStore.getState().addNotification({ type: 'error', message: `Commander failed: ${e.message}` }) }
                     }
@@ -1564,6 +1565,7 @@ export default function Sidebar() {
                     if (wsId) {
                       try {
                         const s = await api.startTester(wsId, { cli_type: opt.cli, model: opt.model })
+                        useStore.getState().setActiveWorkspace(s.workspace_id)
                         useStore.getState().addSession(s)
                       } catch (e) { console.error(e); useStore.getState().addNotification({ type: 'error', message: `Tester failed: ${e.message}` }) }
                     }
@@ -1613,6 +1615,7 @@ export default function Sidebar() {
                     if (wsId) {
                       try {
                         const s = await api.startDocumentor(wsId, { cli_type: opt.cli, model: opt.model, allow_all_edits: docAllowAllEdits })
+                        useStore.getState().setActiveWorkspace(s.workspace_id)
                         useStore.getState().addSession(s)
                         // Auto-send kickoff prompt after PTY boots
                         setTimeout(() => {
