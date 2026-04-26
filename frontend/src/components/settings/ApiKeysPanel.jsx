@@ -8,7 +8,6 @@ import {
   XCircle,
   Loader2,
   Trash2,
-  ExternalLink,
 } from 'lucide-react'
 import { api } from '../../lib/api'
 

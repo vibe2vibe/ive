@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   Shield, X, Plus, Trash2, Check, AlertTriangle, Ban,
-  HelpCircle, Clock, ChevronDown, ChevronRight, Pencil,
+  HelpCircle, ChevronDown, ChevronRight, Pencil,
   Sparkles, ToggleLeft, ToggleRight, RefreshCw, ShieldCheck,
   Terminal, Package, Globe, Search, Lock, Brain,
 } from 'lucide-react'

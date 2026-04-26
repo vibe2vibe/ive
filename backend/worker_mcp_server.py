@@ -279,6 +279,186 @@ def tool_report_pipeline_result(args: dict) -> str:
     return json.dumps(result)
 
 
+# ─── Memory write (worker-side) ─────────────────────────────────────────
+
+VALID_MEMORY_TYPES = {"user", "feedback", "project", "reference"}
+
+
+def tool_save_memory(args: dict) -> str:
+    """Persist a durable insight to the workspace memory pool.
+
+    Workers historically had `search_memory` (read) but no write path, so
+    everything they learned died with the session. This closes that gap.
+    Entries are tagged `auto=0` (manually saved by the agent — deliberate)
+    to keep them out of the autolearn review queue.
+    """
+    name = (args.get("name") or "").strip()
+    content = (args.get("content") or "").strip()
+    mem_type = (args.get("type") or "").strip()
+    tags = args.get("tags") or []
+
+    if not name or not content:
+        return json.dumps({"ok": False, "error": "name and content are required"})
+    if mem_type not in VALID_MEMORY_TYPES:
+        return json.dumps({
+            "ok": False,
+            "error": f"type must be one of {sorted(VALID_MEMORY_TYPES)}",
+        })
+
+    # Idempotent on `name` within this workspace: look up first, update if
+    # already present, otherwise create fresh.
+    existing = api_call(
+        "GET",
+        f"/memory?workspace_id={urllib.parse.quote(WORKSPACE_ID)}",
+    )
+    match_id = None
+    if isinstance(existing, list):
+        for e in existing:
+            if (e.get("name") or "").strip().lower() == name.lower() and (
+                (e.get("workspace_id") or "") == WORKSPACE_ID
+            ):
+                match_id = e.get("id")
+                break
+
+    body = {
+        "name": name,
+        "type": mem_type,
+        "content": content,
+        "workspace_id": WORKSPACE_ID or None,
+        "tags": tags,
+        "source_cli": "worker",
+    }
+
+    if match_id:
+        result = api_call("PUT", f"/memory/{match_id}", body)
+        if isinstance(result, dict) and result.get("error"):
+            return json.dumps({"ok": False, **result})
+        return json.dumps({"ok": True, "id": match_id, "updated": True})
+
+    result = api_call("POST", "/memory", body)
+    if isinstance(result, dict) and result.get("error"):
+        return json.dumps({"ok": False, **result})
+    return json.dumps({
+        "ok": True,
+        "id": (result or {}).get("id"),
+        "created": True,
+    })
+
+
+# ─── Headsup + Blocking bulletin ────────────────────────────────────────
+
+def tool_headsup(args: dict) -> str:
+    """Send a non-blocking notice to a peer or commander.
+
+    Thin wrapper over the existing bulletin board with explicit recipient
+    routing and `blocking=false`. Use this when you want a peer to *see*
+    something but you're not waiting on them.
+    """
+    from peer_comms import post_peer_message
+
+    to = (args.get("to") or "all").strip() or "all"
+    message = (args.get("message") or "").strip()
+    topic = (args.get("topic") or "general").strip() or "general"
+    if not message:
+        return json.dumps({"ok": False, "error": "message required"})
+
+    result = post_peer_message(
+        api_url=API_URL,
+        workspace_id=WORKSPACE_ID,
+        from_session_id=SESSION_ID,
+        content=message,
+        to=to,
+        topic=topic,
+        priority="heads_up",
+        blocking=False,
+    )
+    if isinstance(result, dict) and result.get("error"):
+        return json.dumps({"ok": False, **result})
+    return json.dumps({"ok": True, "id": (result or {}).get("id"), "to": to})
+
+
+def tool_blocking_bulletin(args: dict) -> str:
+    """Post a blocking bulletin and wait synchronously for a peer reply.
+
+    The MCP loop is single-threaded and that's the point — the agent
+    pauses until commander/peer responds (or until timeout). On timeout
+    we always return — never deadlock the agent.
+    """
+    from peer_comms import post_peer_message, wait_for_reply
+
+    to = (args.get("to") or "commander").strip() or "commander"
+    question = (args.get("question") or "").strip()
+    timeout_secs = int(args.get("timeout_secs") or 600)
+    if not question:
+        return json.dumps({"ok": False, "error": "question required"})
+
+    posted = post_peer_message(
+        api_url=API_URL,
+        workspace_id=WORKSPACE_ID,
+        from_session_id=SESSION_ID,
+        content=question,
+        to=to,
+        topic="blocking",
+        priority="blocking",
+        blocking=True,
+    )
+    if not isinstance(posted, dict) or posted.get("error") or not posted.get("id"):
+        return json.dumps({"ok": False, "error": posted.get("error") if isinstance(posted, dict) else "post failed"})
+
+    bulletin_id = posted["id"]
+    reply = wait_for_reply(
+        api_url=API_URL,
+        workspace_id=WORKSPACE_ID,
+        bulletin_id=bulletin_id,
+        timeout_secs=timeout_secs,
+    )
+    if not reply:
+        return json.dumps({
+            "ok": False,
+            "reason": "timeout",
+            "bulletin_id": bulletin_id,
+            "timeout_secs": timeout_secs,
+        })
+
+    return json.dumps({
+        "ok": True,
+        "bulletin_id": bulletin_id,
+        "reply": {
+            "id": reply.get("id"),
+            "from_session_id": reply.get("from_session_id"),
+            "content": reply.get("content"),
+            "created_at": reply.get("created_at"),
+        },
+    })
+
+
+# ─── Myelin coordination tools (gated on experimental flag) ─────────────
+
+def tool_coord_check_overlap(args: dict) -> str:
+    from peer_comms import myelin_check_overlap
+    file_path = args.get("file_path", "")
+    intent = args.get("intent", "") or f"editing {file_path}"
+    return json.dumps(myelin_check_overlap(SESSION_ID, intent, file_path), indent=2)
+
+
+def tool_coord_acquire(args: dict) -> str:
+    from peer_comms import myelin_acquire
+    file_path = args.get("file_path", "")
+    intent = args.get("intent", "")
+    return json.dumps(myelin_acquire(SESSION_ID, file_path, intent), indent=2)
+
+
+def tool_coord_release(args: dict) -> str:
+    from peer_comms import myelin_release
+    file_path = args.get("file_path", "")
+    return json.dumps(myelin_release(SESSION_ID, file_path), indent=2)
+
+
+def tool_coord_peers(args: dict) -> str:
+    from peer_comms import myelin_peers
+    return json.dumps(myelin_peers(SESSION_ID), indent=2)
+
+
 # ─── Tool registry ──────────────────────────────────────────────────────
 
 TOOLS = {
@@ -401,6 +581,50 @@ TOOLS = {
             "required": ["task_id"],
         },
     },
+    "save_memory": {
+        "handler": tool_save_memory,
+        "description": (
+            "MEMORY IS YOUR FUTURE SELF — call this often. Use this whenever you make a "
+            "significant decision, hit a non-obvious gotcha, get corrected by the user, "
+            "discover a codebase pattern, reject an approach, or finish a task. "
+            "Trigger checklist: (1) finished a task → save type='project' with what was done, "
+            "why, what surprised you, what to watch for next time. (2) user corrected your "
+            "approach → save type='feedback'. (3) discovered a convention or gotcha → save "
+            "type='project' with reproduction context. (4) found a reusable pattern → "
+            "save type='reference'. Don't save trivia (which file you opened); save the "
+            "things a future agent would lose hours rediscovering. Idempotent on `name` — "
+            "re-using a name updates the existing entry instead of duplicating it. "
+            "If you finish a task without calling this at least once, you have failed your "
+            "future self."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Short title (acts as the dedup key within the workspace).",
+                },
+                "type": {
+                    "type": "string",
+                    "enum": ["user", "feedback", "project", "reference"],
+                    "description": (
+                        "user = preferences/role; feedback = approach guidance from corrections; "
+                        "project = ongoing goals/context; reference = pointers to external systems."
+                    ),
+                },
+                "content": {
+                    "type": "string",
+                    "description": "The insight itself. One paragraph or a tight bullet list.",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional tags for filtering.",
+                },
+            },
+            "required": ["name", "type", "content"],
+        },
+    },
 }
 
 # W2W tools are conditionally merged in main() based on workspace feature flags.
@@ -444,9 +668,14 @@ W2W_CONTEXT_TOOLS = {
     "search_memory": {
         "handler": tool_search_memory,
         "description": (
-            "Search across ALL workspace memory — past tasks with lessons learned, session digests, "
-            "knowledge base entries, peer messages, and file activity. This is your go-to tool for "
-            "context before starting any work. Returns results grouped by type with relevance scores."
+            "USE THIS BEFORE you start coding. The workspace's accumulated playbook lives "
+            "here — past tasks with lessons learned, session digests, knowledge base entries, "
+            "peer messages, and file activity. If a peer hit the same gotcha last week, the "
+            "answer is searchable right now. Trigger checklist: (1) before editing an "
+            "unfamiliar module — what conventions has this codebase settled on? (2) before "
+            "picking an approach — was this rejected by a previous worker? (3) before "
+            "asking the user — has the user already answered this for someone else? Returns "
+            "results grouped by type with relevance scores."
         ),
         "inputSchema": {
             "type": "object",
@@ -561,6 +790,127 @@ W2W_CONTEXT_TOOLS = {
 }
 
 
+# ─── W2W: Headsup + blocking bulletins (gated on workspace.comms_enabled) ─
+
+W2W_BULLETIN_TOOLS = {
+    "headsup": {
+        "handler": tool_headsup,
+        "description": (
+            "USE THIS WHENEVER you're about to touch a peer's domain or your work "
+            "affects others. Non-blocking notice to a peer or commander — fire and "
+            "continue. Trigger checklist: (1) starting on a file/area another worker may "
+            "be in. (2) finishing a refactor that changes a shared interface. (3) "
+            "discovering something a peer should know but doesn't need to act on. (4) "
+            "blocked by something but continuing with a workaround. Examples: "
+            "'starting on auth.py', 'finished sidebar refactor — file reorganized', "
+            "'blocked by missing API key, continuing with mock'. They see it on their "
+            "next bulletin check. Set `to` to 'all', 'commander', or a specific "
+            "session_id. Silent overlap is how two workers stomp on the same file — "
+            "send a headsup before that happens."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string", "description": "'all', 'commander', or a specific session_id."},
+                "message": {"type": "string", "description": "Short notice content."},
+                "topic": {"type": "string", "description": "Topic tag (e.g. 'api-schema'). Default: general."},
+            },
+            "required": ["to", "message"],
+        },
+    },
+    "blocking_bulletin": {
+        "handler": tool_blocking_bulletin,
+        "description": (
+            "USE THIS WHENEVER you cannot safely proceed without an answer — and "
+            "especially when coord_check_overlap returned a CONFLICT (≥0.80) with a "
+            "peer's active work. Pauses you until commander or the peer replies, or "
+            "until `timeout_secs` expires (default 600s). Trigger checklist: (1) about "
+            "to delete or rewrite something a peer is actively editing. (2) need a "
+            "decision between two non-trivial approaches. (3) ambiguous user "
+            "requirement that would force expensive rework if guessed wrong. (4) hard "
+            "conflict detected via coord_check_overlap — STOP and ask. Examples: "
+            "'Should I prefer approach A or B?', 'About to delete src/x.py — peer is "
+            "editing it, confirm?'. On timeout you're unblocked with "
+            "{ok: false, reason: 'timeout'} so you can fall back to a documented "
+            "default. Better to wait 30 seconds for an answer than ship a 30-minute "
+            "rewrite of a peer's work."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string", "description": "'commander' or a specific session_id."},
+                "question": {"type": "string", "description": "What you need answered before you can proceed."},
+                "timeout_secs": {"type": "integer", "default": 600, "description": "Max seconds to wait. Default 600."},
+            },
+            "required": ["to", "question"],
+        },
+    },
+}
+
+
+# ─── Myelin coordination tools (gated on experimental flag) ────────────
+
+MYELIN_COORD_TOOLS = {
+    "coord_check_overlap": {
+        "handler": tool_coord_check_overlap,
+        "description": (
+            "Check semantic overlap with peer agents before editing a file. "
+            "Returns a list of active peers with overlap scores and levels "
+            "(conflict ≥0.80, share 0.65–0.80, notify 0.55–0.65). Use this "
+            "before starting destructive work to avoid stepping on a peer's toes."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "File you intend to edit."},
+                "intent": {"type": "string", "description": "Short description of what you're about to do."},
+            },
+            "required": ["file_path", "intent"],
+        },
+    },
+    "coord_acquire": {
+        "handler": tool_coord_acquire,
+        "description": (
+            "Best-effort claim on a file — announces your task in the shared "
+            "coordination graph so peers see your intent. Not a hard lock; "
+            "peers can still proceed but they'll see your announcement on "
+            "their overlap check."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "File you're starting to edit."},
+                "intent": {"type": "string", "description": "Optional richer intent description."},
+            },
+            "required": ["file_path"],
+        },
+    },
+    "coord_release": {
+        "handler": tool_coord_release,
+        "description": (
+            "Release your claim on a file — marks your active coordination "
+            "tasks for that file as completed. Call this when you finish "
+            "editing so peers stop seeing you as active on it."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "File you're done editing."},
+            },
+            "required": ["file_path"],
+        },
+    },
+    "coord_peers": {
+        "handler": tool_coord_peers,
+        "description": (
+            "List active peer agents in this workspace's coordination namespace, "
+            "with what they're working on. Read-only situational awareness."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+}
+
+
 # ─── MCP stdio protocol ─────────────────────────────────────────────────
 
 def handle_request(req: dict) -> dict:
@@ -631,6 +981,17 @@ def _load_workspace_flags() -> dict:
     return {}
 
 
+def _app_setting(key: str) -> str | None:
+    """Fetch a single app_settings value. None on any failure (fail-safe)."""
+    try:
+        result = api_call("GET", f"/settings/{key}")
+        if isinstance(result, dict):
+            return result.get("value")
+    except Exception:
+        pass
+    return None
+
+
 def main():
     if not SESSION_ID:
         print("WORKER_SESSION_ID env var not set — cannot scope task access.", file=sys.stderr)
@@ -640,8 +1001,18 @@ def main():
     flags = _load_workspace_flags()
     if flags.get("comms"):
         TOOLS.update(W2W_COMMS_TOOLS)
+        # Headsup + blocking_bulletin ride alongside the existing bulletin
+        # board: same surface, same workspace flag.
+        TOOLS.update(W2W_BULLETIN_TOOLS)
     if flags.get("context"):
         TOOLS.update(W2W_CONTEXT_TOOLS)
+
+    # Myelin coord tools — only if the user has opted into the experimental
+    # feature globally AND the workspace has coordination enabled. The MCP
+    # server is started fresh per session, so toggling these requires a
+    # session restart (matches the checkpoint/model-switching pattern).
+    if flags.get("coordination") and _app_setting("experimental_myelin_coordination") == "on":
+        TOOLS.update(MYELIN_COORD_TOOLS)
 
     for line in sys.stdin:
         line = line.strip()

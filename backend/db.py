@@ -1008,7 +1008,11 @@ SEED_MCP_SERVERS = [
         "description": "Browser automation — navigate, click, fill forms, screenshot, and scrape web pages",
         "server_type": "stdio",
         "command": "npx",
-        "args": ["-y", "@playwright/mcp@latest"],
+        # Default to --headless so the Tester doesn't pop a browser window and
+        # steal focus on every run. Sessions can opt into a visible browser via
+        # the "Show browser" checkbox in the Tester picker (tag: tester_headed),
+        # which strips --headless at PTY start.
+        "args": ["-y", "@playwright/mcp@latest", "--headless"],
         "env": {},
         "auto_approve": 0,
         "is_builtin": 0,
@@ -1302,6 +1306,26 @@ async def init_db():
             "ALTER TABLE package_scans ADD COLUMN llm_verdict TEXT DEFAULT ''",
             # Memory injection tracking: JSON with count + chars injected at PTY start
             "ALTER TABLE sessions ADD COLUMN memory_injected_info TEXT",
+            # Autolearn: rows authored by the auto_learn module are flagged auto=1
+            # so the UI can route them to a review queue instead of mixing them
+            # with manually curated memory. confidence is the LLM's self-rated
+            # 0..1 score for how durable/non-obvious the insight is.
+            "ALTER TABLE memory_entries ADD COLUMN auto INTEGER DEFAULT 0",
+            "ALTER TABLE memory_entries ADD COLUMN confidence REAL DEFAULT 1.0",
+            # W2W: Blocking bulletins — peer messages that pause the sender
+            # until a reply arrives (used by `blocking_bulletin` MCP tool).
+            # `blocking=1` means the sender is awaiting a reply; a peer
+            # response with `in_reply_to=<bulletin_id>` releases the wait.
+            "ALTER TABLE peer_messages ADD COLUMN blocking INTEGER DEFAULT 0",
+            "ALTER TABLE peer_messages ADD COLUMN in_reply_to TEXT",
+            "ALTER TABLE peer_messages ADD COLUMN reply_received INTEGER DEFAULT 0",
+            "CREATE INDEX IF NOT EXISTS idx_peer_messages_in_reply_to ON peer_messages(in_reply_to)",
+            # Demo runner: per-workspace stable preview build (see backend/demo_runner.py)
+            "ALTER TABLE workspaces ADD COLUMN demo_command TEXT DEFAULT 'npm run dev'",
+            "ALTER TABLE workspaces ADD COLUMN demo_branch TEXT DEFAULT 'main'",
+            "ALTER TABLE workspaces ADD COLUMN demo_port INTEGER DEFAULT 0",
+            # Auto-extract workspace knowledge from completed sessions on clean exit
+            "ALTER TABLE workspaces ADD COLUMN auto_knowledge_enabled INTEGER DEFAULT 0",
         ):
             try:
                 await db.execute(ddl)
@@ -1352,6 +1376,24 @@ async def init_db():
                     await db.execute(
                         "UPDATE mcp_servers SET env = ? WHERE id = 'builtin-worker-board'",
                         (json.dumps(env),),
+                    )
+        except Exception:
+            pass
+
+        # Backfill --headless on the Playwright MCP for existing DBs. Only
+        # rewrite if the row still has the old default args; respect any user
+        # customization.
+        try:
+            cur = await db.execute(
+                "SELECT args FROM mcp_servers WHERE id = 'builtin-playwright'"
+            )
+            row = await cur.fetchone()
+            if row:
+                args = json.loads(row["args"] or "[]")
+                if args == ["-y", "@playwright/mcp@latest"]:
+                    await db.execute(
+                        "UPDATE mcp_servers SET args = ? WHERE id = 'builtin-playwright'",
+                        (json.dumps(["-y", "@playwright/mcp@latest", "--headless"]),),
                     )
         except Exception:
             pass

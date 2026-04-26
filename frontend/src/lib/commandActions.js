@@ -1,8 +1,8 @@
 import {
-  Plus, FolderOpen, MessageSquare, X, ToggleLeft, Settings,
+  Plus, FolderOpen, X, ToggleLeft, Settings,
   BookOpen, FileText, Keyboard, Square, Shield, Columns, Radio,
   Search, Copy, Download, Layout, LayoutGrid, History, Inbox, ListChecks,
-  Kanban, GitBranch, GitCompareArrows, Crown, StickyNote, User, RotateCcw, Globe, Package,
+  Kanban, GitBranch, GitCompareArrows, Crown, StickyNote, User, RotateCcw, Package,
   FlaskConical, Zap, Volume2, MessageSquareQuote, ListOrdered, Server, Sparkles,
   Brain, MessagesSquare, ExternalLink, BookOpenCheck, Key, Telescope
 } from 'lucide-react'

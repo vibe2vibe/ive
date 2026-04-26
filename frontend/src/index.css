@@ -60,6 +60,10 @@
 /* ─── Base ─── */
 html, body {
   overscroll-behavior: none;
+  /* Prevent horizontal page scroll on narrow viewports */
+  overflow-x: hidden;
+  /* Allow CSS to use the small/large viewport units on mobile (iOS Safari URL bar) */
+  height: 100%;
 }
 
 body {
@@ -68,6 +72,29 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   letter-spacing: -0.011em;
+}
+
+/* ─── Mobile: tap targets and touch behavior ───────────────────────── */
+@media (max-width: 767px) {
+  /* Avoid iOS double-tap-to-zoom delay on interactive elements */
+  button, [role="button"], a, summary, input[type="checkbox"], input[type="radio"], select {
+    touch-action: manipulation;
+  }
+  /* iOS auto-zooms on focus for inputs <16px font-size; bump in mobile only */
+  input[type="text"], input[type="search"], input[type="email"], input[type="password"],
+  input[type="number"], input[type="url"], textarea, select {
+    font-size: 16px;
+  }
+}
+
+/* ─── Tab strip: snap on mobile for nicer horizontal scroll feel ─── */
+@media (max-width: 767px) {
+  .tab-scroll-hide {
+    scroll-snap-type: x proximity;
+  }
+  .tab-scroll-hide > * {
+    scroll-snap-align: start;
+  }
 }
 
 /* ─── Interactive elements always get pointer cursor ─── */

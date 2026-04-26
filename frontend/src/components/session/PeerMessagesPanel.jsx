@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { X, Send, Filter, Tag, FileText, AlertTriangle, Info, Clock } from 'lucide-react'
+import { X, Send, Filter, Tag, FileText, Clock } from 'lucide-react'
 import { api } from '../../lib/api'
 import useStore from '../../state/store'
 

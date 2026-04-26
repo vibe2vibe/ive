@@ -150,10 +150,10 @@ export default function Composer({ sessionId, initialValue, onClose }) {
 
   if (collapsed) {
     return (
-      <div className="border-t border-border-primary bg-bg-primary px-3 py-1.5 flex items-center gap-2 cursor-pointer select-none" onClick={() => setCollapsed(false)}>
+      <div className="border-t border-border-primary bg-bg-primary px-3 py-1.5 md:py-1.5 flex items-center gap-2 cursor-pointer select-none touch-manipulation" style={{ minHeight: 44 }} onClick={() => setCollapsed(false)}>
         <ChevronUp size={12} className="text-text-faint" />
         <span className="text-[11px] text-text-faint">Compose</span>
-        <kbd className="text-[10px] text-text-faint bg-bg-tertiary px-1 rounded">⌘E</kbd>
+        <kbd className="hidden md:inline text-[10px] text-text-faint bg-bg-tertiary px-1 rounded">⌘E</kbd>
         {value.trim() && <span className="text-[10px] text-amber-400 ml-1">draft</span>}
       </div>
     )
@@ -175,11 +175,11 @@ export default function Composer({ sessionId, initialValue, onClose }) {
         <button
           onClick={handleSubmit}
           disabled={!value.trim()}
-          className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium bg-accent-primary hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed text-white rounded transition-colors"
+          className="flex items-center gap-1 px-3 py-2 md:px-2 md:py-1 text-[12px] md:text-[11px] font-medium bg-accent-primary hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed text-white rounded transition-colors touch-manipulation"
         >
-          <Send size={10} /> submit
+          <Send size={12} /> submit
         </button>
-        <kbd className="text-[10px] text-text-faint bg-bg-tertiary px-1 rounded">⌘↵</kbd>
+        <kbd className="hidden md:inline text-[10px] text-text-faint bg-bg-tertiary px-1 rounded">⌘↵</kbd>
         <button onClick={onClose} className="p-1 text-text-faint hover:text-text-secondary rounded hover:bg-bg-hover transition-colors">
           <X size={13} />
         </button>

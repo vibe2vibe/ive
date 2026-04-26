@@ -16,11 +16,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 from urllib.parse import quote as url_quote, unquote
 
 import aiohttp

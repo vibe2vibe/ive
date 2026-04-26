@@ -365,17 +365,27 @@ def check_avcp_installation() -> dict:
 MYELIN_DIR = project_root() / "ext-repo" / "myelin"
 
 _MYELIN_MARKER = "myelin.coordination.hook"
+# New command form uses an absolute filesystem path (slashes), old form
+# used `python3 -m` (dots). Match either so we can still recognize and
+# clean up legacy entries during uninstall / re-install.
+_MYELIN_PATH_MARKER = "myelin/coordination/hook"
 
 
 def _is_myelin_hook(hook: dict) -> bool:
-    return _MYELIN_MARKER in hook.get("command", "")
+    cmd = hook.get("command", "")
+    return _MYELIN_MARKER in cmd or _MYELIN_PATH_MARKER in cmd
 
 
 def _myelin_cmd(event: str) -> str:
     from resource_path import is_frozen, project_root
     if is_frozen():
         return f"{project_root() / 'bin' / 'ive-myelin-hook'} --event {event}"
-    return f"python3 -m myelin.coordination.hook --event {event}"
+    # `python3 -m myelin.coordination.hook` fails because `myelin` is at
+    # ext-repo/myelin/ and is not on Python's import path. Invoke the script
+    # by absolute path; hook.py self-bootstraps its sys.path for the lazy
+    # `from myelin import ...` imports inside handle_pre_tool.
+    hook_script = project_root() / "ext-repo" / "myelin" / "coordination" / "hook.py"
+    return f"python3 {hook_script} --event {event}"
 
 
 def _myelin_prompt_entry() -> dict:

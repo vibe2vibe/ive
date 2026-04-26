@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react'
-import { X, Sparkles, Loader2, Save, RotateCcw, FileText, Shield, ListOrdered, Check } from 'lucide-react'
+import { useState } from 'react'
+import { X, Sparkles, Loader2, Save, FileText, Shield, ListOrdered, Check } from 'lucide-react'
 import useStore from '../../state/store'
 import { api } from '../../lib/api'
-import { MODELS, GEMINI_MODELS, CLI_TYPES, getModelsForCli } from '../../lib/constants'
+import { CLI_TYPES, getModelsForCli } from '../../lib/constants'
 
 const ARTIFACT_TYPES = [
   { id: 'guideline', label: 'Guideline', icon: Shield, description: 'Reusable rules & principles for future sessions' },

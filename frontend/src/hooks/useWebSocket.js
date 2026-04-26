@@ -123,8 +123,8 @@ export default function useWebSocket() {
         }
 
         // Deep-research subprocess events are job-scoped, not session-scoped.
-        // Surface them as DOM events so any open ResearchPanel can refresh
-        // without us needing to add a research slice to the global store.
+        // Surface them as DOM events so any open research panel (ResearchHub)
+        // can refresh without us needing to add a research slice to the global store.
         if (data.type === 'research_started'
             || data.type === 'research_progress'
             || data.type === 'research_done') {
@@ -197,6 +197,15 @@ export default function useWebSocket() {
         }
         if (data.type === 'pipeline_run_update') {
           if (data.run) useStore.getState().handlePipelineRunUpdate(data.run)
+          return
+        }
+
+        // Scratchpad live-sync — routed to the open Scratchpad via window event
+        // (component-local textarea state, not Zustand, to avoid re-render storms).
+        if (data.type === 'scratchpad_updated') {
+          window.dispatchEvent(new CustomEvent('scratchpad-remote-update', {
+            detail: { sessionId: data.session_id, content: data.content, origin: data.origin },
+          }))
           return
         }
 

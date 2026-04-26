@@ -1,7 +1,11 @@
 {
   "name": "ive",
   "version": "1.0.0",
-  "description": "Integrated Vibecoding Environment — multi-session terminal orchestration for Claude Code & Gemini CLI",
+  "description": "Integrated Vibecoding Environment — control multiple Claude Code & Gemini CLI sessions from one browser UI",
+  "homepage": "https://github.com/vibe2vibe/ive#readme",
+  "bugs": {
+    "url": "https://github.com/vibe2vibe/ive/issues"
+  },
   "bin": {
     "ive": "./start.sh"
   },
@@ -10,16 +14,17 @@
     "url": "https://github.com/vibe2vibe/ive.git"
   },
   "keywords": [
-    "claude",
-    "gemini",
+    "claude-code",
+    "gemini-cli",
+    "agent",
     "terminal",
+    "developer-tools",
     "orchestration",
     "ai",
-    "agent",
     "cli",
     "vibecoding"
   ],
-  "author": "v77.ai",
+  "author": "Michael Ramich",
   "license": "MIT",
   "dependencies": {
     "@supabase/supabase-js": "^2.104.1"

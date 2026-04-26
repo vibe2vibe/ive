@@ -3,6 +3,7 @@ import { api } from '../lib/api'
 import { getKeybindings } from '../lib/keybindings'
 import { terminalControls, startedSessions } from '../lib/terminalWriters'
 import { hasVariables } from '../lib/cascadeVariables'
+import { uuid } from '../lib/uuid'
 
 const useStore = create((set, get) => ({
   // ─── CLI Profiles (loaded from /api/cli-info/features) ────
@@ -298,7 +299,7 @@ const useStore = create((set, get) => ({
   notifications: [],
   addNotification: (notif) =>
     set((s) => ({
-      notifications: [...s.notifications, { id: crypto.randomUUID(), timestamp: Date.now(), ...notif }],
+      notifications: [...s.notifications, { id: uuid(), timestamp: Date.now(), ...notif }],
     })),
   removeNotification: (id) =>
     set((s) => ({ notifications: s.notifications.filter((n) => n.id !== id) })),
@@ -307,7 +308,7 @@ const useStore = create((set, get) => ({
   backgroundResults: [],
   addBackgroundResult: (result) =>
     set((s) => ({
-      backgroundResults: [{ id: crypto.randomUUID(), timestamp: Date.now(), ...result }, ...s.backgroundResults],
+      backgroundResults: [{ id: uuid(), timestamp: Date.now(), ...result }, ...s.backgroundResults],
     })),
   removeBackgroundResult: (id) =>
     set((s) => ({ backgroundResults: s.backgroundResults.filter((r) => r.id !== id) })),
@@ -589,7 +590,7 @@ const useStore = create((set, get) => ({
   // ─── Captures ────────────────────────────────
   pendingCaptures: [],
   addCapture: (capture) => set((s) => ({
-    pendingCaptures: [...s.pendingCaptures, { id: crypto.randomUUID(), timestamp: Date.now(), ...capture }]
+    pendingCaptures: [...s.pendingCaptures, { id: uuid(), timestamp: Date.now(), ...capture }]
   })),
   resolveCapture: (id) => set((s) => ({
     pendingCaptures: s.pendingCaptures.filter((c) => c.id !== id)
@@ -616,7 +617,7 @@ const useStore = create((set, get) => ({
     let name = localStorage.getItem('ive_client_name')
     let color = localStorage.getItem('ive_client_color')
     if (!clientId) {
-      clientId = crypto.randomUUID()
+      clientId = uuid()
       localStorage.setItem('ive_client_id', clientId)
     }
     if (!name) {

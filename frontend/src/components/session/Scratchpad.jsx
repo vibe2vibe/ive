@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { X, StickyNote, Mic, MicOff, Copy, Zap } from 'lucide-react'
 import { api } from '../../lib/api'
+import { uuid } from '../../lib/uuid'
 
 export default function Scratchpad({ sessionId, onClose }) {
   const [content, setContent] = useState('')
@@ -12,6 +13,16 @@ export default function Scratchpad({ sessionId, onClose }) {
   const textareaRef = useRef(null)
   const lastRightClick = useRef(0)
   const voiceRecRef = useRef(null)
+  // Stable per-mount client id so we can ignore our own broadcast echo.
+  const clientId = useRef(uuid())
+  // Tracks the last time the user typed locally — used to defer remote
+  // updates while they're actively editing (avoids cursor jumps).
+  const lastTypedAt = useRef(0)
+  const isFocused = useRef(false)
+  // Holds a pending remote update to apply after focus/idle.
+  const pendingRemote = useRef(null)
+  const sessionIdRef = useRef(sessionId)
+  useEffect(() => { sessionIdRef.current = sessionId }, [sessionId])
 
   // Load scratchpad on mount / session change
   useEffect(() => {
@@ -29,12 +40,38 @@ export default function Scratchpad({ sessionId, onClose }) {
       if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(async () => {
         setSaving(true)
-        await api.updateSessionScratchpad(sessionId, text)
+        await api.updateSessionScratchpad(sessionId, text, clientId.current)
         setSaving(false)
       }, 600)
     },
     [sessionId],
   )
+
+  // Live-sync: receive scratchpad updates from other clients via WS.
+  useEffect(() => {
+    const onRemote = (e) => {
+      const { sessionId: sid, content: incoming, origin } = e.detail || {}
+      if (sid !== sessionIdRef.current) return
+      if (origin && origin === clientId.current) return // own echo
+
+      const apply = (text) => {
+        // Cancel any pending self-save so we don't clobber the incoming value.
+        if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null }
+        setContent(text)
+      }
+
+      const recentlyTyped = Date.now() - lastTypedAt.current < 1500
+      if (isFocused.current && recentlyTyped) {
+        // Defer — apply after the user stops typing or blurs.
+        pendingRemote.current = incoming
+      } else {
+        pendingRemote.current = null
+        apply(incoming)
+      }
+    }
+    window.addEventListener('scratchpad-remote-update', onRemote)
+    return () => window.removeEventListener('scratchpad-remote-update', onRemote)
+  }, [])
 
   // Cleanup timers + recording on unmount
   useEffect(() => () => {
@@ -44,8 +81,21 @@ export default function Scratchpad({ sessionId, onClose }) {
 
   const handleChange = (e) => {
     const text = e.target.value
+    lastTypedAt.current = Date.now()
     setContent(text)
     save(text)
+  }
+
+  const handleFocus = () => { isFocused.current = true }
+  const handleBlur = () => {
+    isFocused.current = false
+    // Apply any deferred remote update once the user is no longer editing.
+    if (pendingRemote.current !== null) {
+      const text = pendingRemote.current
+      pendingRemote.current = null
+      if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null }
+      setContent(text)
+    }
   }
 
   // Append text and save
@@ -207,6 +257,8 @@ export default function Scratchpad({ sessionId, onClose }) {
         ref={textareaRef}
         value={content}
         onChange={handleChange}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
         placeholder="Notes, links, context...&#10;&#10;Double right-click for voice input&#10;Select text → right-click for options"
         spellCheck={false}
         className="flex-1 w-full resize-none bg-transparent text-zinc-300 text-[12px] font-mono leading-relaxed p-3 placeholder-zinc-700 focus:outline-none selection:bg-indigo-500/30"

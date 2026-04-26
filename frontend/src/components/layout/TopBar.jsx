@@ -15,7 +15,7 @@ export default function TopBar() {
   const currentCli = session.cli_type || 'claude'
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 bg-bg-secondary border-b border-border-primary text-xs">
+    <div className="flex items-center gap-2 px-3 py-1.5 bg-bg-secondary border-b border-border-primary text-xs overflow-x-auto tab-scroll-hide touch-manipulation">
       {/* Session info */}
       <div className="flex items-center gap-2">
         {session.cli_type === 'gemini' && (

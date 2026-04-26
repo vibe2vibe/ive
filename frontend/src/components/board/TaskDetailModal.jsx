@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   X, Save, Trash2, ExternalLink, Mic, MicOff,
-  Play, ClipboardPaste, CheckSquare, PenTool, FileText, Download,
-  Image, Upload, Globe, Camera, RotateCcw, ChevronDown, ChevronRight, Link
+  Play, ClipboardPaste, CheckSquare, PenTool, Download,
+  Upload, Globe, Camera, RotateCcw, Link
 } from 'lucide-react'
 import { api } from '../../lib/api'
 import useStore from '../../state/store'

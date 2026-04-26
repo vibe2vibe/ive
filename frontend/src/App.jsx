@@ -1,8 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { X } from 'lucide-react'
+import { X, Menu } from 'lucide-react'
 import useWebSocket from './hooks/useWebSocket'
 import useKeyboard from './hooks/useKeyboard'
+import useMediaQuery from './hooks/useMediaQuery'
 import Sidebar from './components/layout/Sidebar'
+import MobileDrawer from './components/layout/MobileDrawer'
 import TopBar from './components/layout/TopBar'
 import StatusBar from './components/layout/StatusBar'
 import SessionTabs from './components/session/SessionTabs'
@@ -377,6 +379,15 @@ export default function App() {
   const [composerDraft, setComposerDraft] = useState('') // pre-filled from annotator
   const [screenshotData, setScreenshotData] = useState(null) // { imageUrl, sourceUrl }
 
+  // ── Mobile responsive state ───────────────────────────────────
+  // Below 768px the sidebar collapses behind a hamburger button into a slide-in drawer.
+  const isMobile = useMediaQuery('(max-width: 767px)')
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false)
+  // Auto-close drawer when leaving mobile breakpoint to avoid stuck-open state
+  useEffect(() => { if (!isMobile && mobileDrawerOpen) setMobileDrawerOpen(false) }, [isMobile, mobileDrawerOpen])
+  // Auto-close drawer on session change (tap a session in drawer → drawer closes)
+  useEffect(() => { if (isMobile) setMobileDrawerOpen(false) }, [activeSessionId, isMobile])
+
   // Close all exclusive modal/overlay panels. Called before opening a new panel
   // to enforce mutual exclusion — only one overlay at a time. Inline panels
   // (Composer, Scratchpad, CascadeBar) are excluded since they coexist with modals.
@@ -686,9 +697,47 @@ export default function App() {
   }, [toggleSplitView])
 
   return (
-    <div className="flex h-screen overflow-hidden bg-bg-primary">
-      {sidebarVisible && <Sidebar />}
+    <div
+      className="flex h-[100dvh] overflow-hidden bg-bg-primary"
+      style={{
+        paddingTop: 'env(safe-area-inset-top, 0px)',
+        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+        paddingLeft: 'env(safe-area-inset-left, 0px)',
+        paddingRight: 'env(safe-area-inset-right, 0px)',
+      }}
+    >
+      {/* Desktop / tablet sidebar — only mounted on md+, narrower on md, full width on lg */}
+      {sidebarVisible && !isMobile && (
+        <div className="flex md:w-60 lg:w-72 shrink-0">
+          <Sidebar />
+        </div>
+      )}
+      {/* Mobile slide-in drawer — only mounted on mobile so we don't double-instance Sidebar */}
+      {isMobile && (
+        <MobileDrawer open={mobileDrawerOpen} onClose={() => setMobileDrawerOpen(false)}>
+          <Sidebar />
+        </MobileDrawer>
+      )}
       <main className="flex-1 flex flex-col min-w-0">
+        {/* Mobile-only header — hamburger + active session name */}
+        <div
+          className="md:hidden flex items-center gap-2 px-2 py-1.5 bg-bg-secondary border-b border-border-primary shrink-0"
+          style={{ minHeight: 44 }}
+        >
+          <button
+            onClick={() => setMobileDrawerOpen(true)}
+            aria-label="Open sidebar"
+            className="flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-bg-hover rounded-md touch-manipulation"
+            style={{ width: 44, height: 44 }}
+          >
+            <Menu size={20} />
+          </button>
+          <span className="flex-1 truncate text-[12px] font-medium text-text-secondary">
+            {activeSessionId && sessions[activeSessionId]?.name
+              ? sessions[activeSessionId].name
+              : 'IVE'}
+          </span>
+        </div>
         <SessionTabs />
         {activeSessionId && !showHome && <TopBar />}
         {activeSessionId && !showHome && (

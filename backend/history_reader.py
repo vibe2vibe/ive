@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 from config import CLAUDE_HOME
-from cli_profiles import PROFILES, get_profile
+from cli_profiles import get_profile
 
 logger = logging.getLogger(__name__)
 

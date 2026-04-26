@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Inbox as InboxIcon, MessageSquare, Check, Eye, X, Bell, Archive, RotateCcw, Sparkles, Server } from 'lucide-react'
+import { Inbox as InboxIcon, Check, Eye, X, Bell, Archive, RotateCcw, Sparkles, Server } from 'lucide-react'
 import useStore from '../../state/store'
 import useListKeyboardNav from '../../hooks/useListKeyboardNav'
 

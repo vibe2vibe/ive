@@ -336,7 +336,8 @@ async def _send_step(session_id: str, run_id: str, steps: list[str], step_idx: i
         return
 
     # Write the prompt + Enter to the PTY
-    data = (prompt + "\n").encode("utf-8")
+    # CR (\r), not LF — raw-mode CLI TUIs interpret \r as Enter.
+    data = (prompt + "\r").encode("utf-8")
 
     if not _pty_manager.is_alive(session_id):
         logger.warning("cascade_runner: session %s PTY not alive, marking run failed", session_id[:8])

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { FolderOpen, X, Save, ChevronDown, ChevronRight, Check, GitBranch, MessageSquare, Shield, Brain, ExternalLink, Monitor, Play, Users, RotateCcw, Layers, Plus, Trash2, Link } from 'lucide-react'
+import { FolderOpen, X, Save, ChevronDown, ChevronRight, Check, GitBranch, MessageSquare, Shield, Brain, ExternalLink, Monitor, Play, Users, RotateCcw, Layers, Plus, Trash2, Link, BookOpen } from 'lucide-react'
 import { api } from '../../lib/api'
 import useStore from '../../state/store'
 import { MODELS, GEMINI_MODELS, getWorkspaceColor, WORKSPACE_PALETTE } from '../../lib/constants'
@@ -60,6 +60,7 @@ export default function WorkspaceSettingsPanel({ onClose, initialWorkspaceId }) 
         auto_exec_enabled: ws.auto_exec_enabled || 0,
         pipeline_enabled: ws.pipeline_enabled || 0,
         task_dependencies_enabled: ws.task_dependencies_enabled || 0,
+        auto_knowledge_enabled: ws.auto_knowledge_enabled || 0,
         commander_max_workers: ws.commander_max_workers || 3,
         tester_max_workers: ws.tester_max_workers || 2,
         research_max_iterations: ws.research_max_iterations || '',
@@ -237,10 +238,11 @@ export default function WorkspaceSettingsPanel({ onClose, initialWorkspaceId }) 
                           <div className="flex gap-1 flex-wrap">
                             <button
                               onClick={() => updateField(ws.id, 'color', null)}
-                              className={`w-4 h-4 rounded text-[7px] flex items-center justify-center ${
-                                !form.color ? 'border border-white/50 text-white' : 'border border-border-secondary text-text-faint'
+                              title="No color"
+                              className={`w-4 h-4 rounded flex items-center justify-center transition-colors ${
+                                !form.color ? 'border border-white/50 text-white' : 'border border-border-secondary text-text-faint hover:text-text-secondary hover:border-border-primary'
                               }`}
-                            >∅</button>
+                            ><X size={9} strokeWidth={2.5} /></button>
                             {WORKSPACE_PALETTE.map((c) => (
                               <button
                                 key={c}
@@ -507,7 +509,47 @@ export default function WorkspaceSettingsPanel({ onClose, initialWorkspaceId }) 
 
                       {/* Memory */}
                       <div className="text-[10px] text-text-muted font-semibold uppercase tracking-wider mt-2 mb-1">Memory</div>
+                      <p className="text-[10px] text-text-faint leading-relaxed mb-2">
+                        Hub-and-spoke sync of CLI memory files (CLAUDE.md, GEMINI.md, AGENTS.md) through this workspace.
+                        Conflicts between providers are resolved with a three-way git merge so each CLI keeps its own copy in sync without overwriting the others.
+                      </p>
                       <MemorySettingsSection workspaceId={ws.id} />
+
+                      {/* Workspace Knowledge */}
+                      <div className="text-[10px] text-text-muted font-semibold uppercase tracking-wider mt-2 mb-1">Workspace Knowledge</div>
+                      <p className="text-[10px] text-text-faint leading-relaxed mb-2">
+                        Shared insights about this codebase (gotchas, conventions, patterns) that future agents see in their system prompt.
+                        Workers can call <span className="font-mono text-text-secondary">contribute_knowledge</span> mid-session;
+                        auto-extract distills durable insights from each completed session into the knowledge base.
+                      </p>
+
+                      <Field label="Auto-Extract Knowledge" hint="LLM-extract insights when a session exits cleanly">
+                        <button
+                          onClick={() => updateField(ws.id, 'auto_knowledge_enabled', form.auto_knowledge_enabled ? 0 : 1)}
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded text-[11px] font-mono border transition-colors w-full ${
+                            form.auto_knowledge_enabled
+                              ? 'border-emerald-500 bg-emerald-500/15 text-emerald-400'
+                              : 'border-border-secondary text-text-faint hover:border-border-primary hover:text-text-secondary'
+                          }`}
+                        >
+                          <BookOpen size={12} />
+                          <span>{form.auto_knowledge_enabled ? 'Enabled' : 'Disabled'}</span>
+                          <span className="flex-1" />
+                          <span className="text-[10px] opacity-60">
+                            {form.auto_knowledge_enabled
+                              ? 'Sessions auto-contribute knowledge on clean exit'
+                              : 'Knowledge is only added manually or via MCP tool'}
+                          </span>
+                        </button>
+                        {form.auto_knowledge_enabled ? (
+                          <p className="text-[10px] text-text-faint mt-1">
+                            On clean session exit (5+ turns, non-worktree, non-orchestrator),
+                            an LLM pass extracts up to 5 high-signal entries into the knowledge base,
+                            tagged <span className="font-mono">auto:&lt;session_id&gt;</span>.
+                            Disable if you want manual curation only.
+                          </p>
+                        ) : null}
+                      </Field>
 
                       {/* Automation */}
                       <div className="text-[10px] text-text-muted font-semibold uppercase tracking-wider mt-2 mb-1">Automation</div>

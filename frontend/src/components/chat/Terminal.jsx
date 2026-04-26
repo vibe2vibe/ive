@@ -525,12 +525,31 @@ export default function TerminalView({ sessionId }) {
       } catch { return true }
     }
 
+    // ── Render activity tracking ───────────────────────────────────────
+    // The 1Hz safety-net poll below uses this to suppress refresh when
+    // the terminal has been quiet — avoids waking the renderer for idle
+    // sessions. Bumped on every PTY write and every user keystroke.
+    let lastActivityAt = Date.now()
+    const bumpActivity = () => { lastActivityAt = Date.now() }
+
+    // Force a full visible-rows refresh. Used after writes settle, after
+    // resize/fit, and on visibility transitions where xterm's dirty
+    // tracking can desync from the buffer (e.g. when the element was
+    // hidden via opacity:0 during the last paint).
+    const forceRefresh = () => {
+      try {
+        const rows = term.rows
+        if (rows > 0) term.refresh(0, rows - 1)
+      } catch {}
+    }
+
     // Batch writes per animation frame — prevents split ANSI sequences
     // from causing rendering artifacts
     let pendingData = ''
     let writeRaf = null
     const batchWrite = (data) => {
       pendingData += data
+      bumpActivity()
       if (!writeRaf) {
         writeRaf = requestAnimationFrame(() => {
           if (pendingData) {
@@ -567,6 +586,7 @@ export default function TerminalView({ sessionId }) {
     // what the user has typed into Claude's input box.
     const inputDisp = term.onData((data) => {
       trackTerminalInput(sessionId, data)
+      bumpActivity()
       const ws = useStore.getState().ws
       if (ws?.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ action: 'input', session_id: sessionId, data }))
@@ -587,6 +607,12 @@ export default function TerminalView({ sessionId }) {
         }))
       }
       ensureCursorVisible()
+      // After fit, xterm's renderer may still hold stale row state from the
+      // previous size — force a full repaint once layout settles. Two rAFs +
+      // a short timeout cover both fast tab-switch repaints and slow opacity
+      // transitions (MissionControl, overlays) where dimensions stabilize late.
+      requestAnimationFrame(() => requestAnimationFrame(forceRefresh))
+      setTimeout(forceRefresh, 250)
     }
 
     // Resize — debounced, skips rapid intermediate sizes
@@ -624,14 +650,44 @@ export default function TerminalView({ sessionId }) {
       for (const entry of entries) {
         const nowVisible = entry.isIntersecting && entry.boundingClientRect.width > 10
         if (nowVisible && !wasVisible) {
-          // Became visible — refit after layout settles
+          // Became visible — refit after layout settles. doResize already
+          // schedules a forceRefresh, so stale rows that accumulated while
+          // hidden (opacity:0 tab, off-screen grid cell) get repainted here.
+          // Bump activity so the 1Hz safety net keeps an eye on it for a
+          // few ticks after re-entry.
+          bumpActivity()
           setTimeout(doResize, 80)
           setTimeout(doResize, 300)
+          // Belt-and-suspenders refresh in case the doResize-triggered
+          // refresh races with the opacity transition.
+          setTimeout(forceRefresh, 500)
         }
         wasVisible = nowVisible
       }
     }, { threshold: 0.01 })
     intersectionObs.observe(el)
+
+    // ── 1Hz safety-net refresh ─────────────────────────────────────────
+    // xterm's renderer occasionally desyncs from buffer state on rapid
+    // writes — symptoms: cursor in the wrong column, missing fragments,
+    // stale rows that only repaint after another event. A periodic full
+    // refresh forces the renderer back in sync. We gate on:
+    //   1. Recent activity (writes or keystrokes within 3s) — idle
+    //      sessions don't need repainting.
+    //   2. Visibility — skip when the page is hidden, the element is
+    //      offscreen (offsetParent === null when display:none), or the
+    //      IntersectionObserver last reported it as not visible.
+    // refresh(0, rows-1) is cheap (single frame, no DOM thrash) but we
+    // still suppress it in the common idle case to keep CPU at zero.
+    const SAFETY_NET_INTERVAL_MS = 1000
+    const ACTIVITY_WINDOW_MS = 3000
+    const safetyNetTimer = setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      if (!wasVisible) return
+      if (!el.offsetParent && el.style.display !== '') return
+      if (Date.now() - lastActivityAt > ACTIVITY_WINDOW_MS) return
+      forceRefresh()
+    }, SAFETY_NET_INTERVAL_MS)
 
     // Refit when the page regains visibility (e.g. switching back from another
     // app/window). In grid view all terminals are always mounted so the
@@ -641,6 +697,10 @@ export default function TerminalView({ sessionId }) {
     // squished. A short delay lets the browser finish any pending layout work.
     const visibilityListener = () => {
       if (document.visibilityState === 'visible') {
+        // Bump activity so the safety-net poll fires for a few ticks after
+        // the tab is re-shown — covers the case where the browser deferred
+        // paints while hidden and rows are stale.
+        bumpActivity()
         setTimeout(() => sendResize(), 150)
       }
     }
@@ -703,6 +763,7 @@ export default function TerminalView({ sessionId }) {
         if (retryTimer) clearTimeout(retryTimer)
         if (resizeTimer) clearTimeout(resizeTimer)
         if (writeRaf) cancelAnimationFrame(writeRaf)
+        clearInterval(safetyNetTimer)
         termRef.current = null
         terminalWriters.delete(sessionId)
         terminalControls.delete(sessionId)
@@ -746,6 +807,7 @@ export default function TerminalView({ sessionId }) {
       clearTimeout(remountTimer)
       if (resizeTimer) clearTimeout(resizeTimer)
       if (writeRaf) cancelAnimationFrame(writeRaf)
+      clearInterval(safetyNetTimer)
       termRef.current = null
       terminalWriters.delete(sessionId)
       terminalControls.delete(sessionId)

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { X, Plus, Trash2, LayoutGrid, Check, GripVertical } from 'lucide-react'
 import useStore from '../../state/store'
 import useListKeyboardNav from '../../hooks/useListKeyboardNav'
+import { uuid } from '../../lib/uuid'
 
 /**
  * Visual editor for custom grid layouts.
@@ -53,13 +54,13 @@ export default function GridTemplateEditor({ onClose }) {
 
   const startNew = () => {
     setEditing({
-      id: crypto.randomUUID(),
+      id: uuid(),
       name: 'New layout',
       cols: 3,
       cells: [
-        { id: crypto.randomUUID(), col: 1, row: 1, colSpan: 2, rowSpan: 2 },
-        { id: crypto.randomUUID(), col: 3, row: 1, colSpan: 1, rowSpan: 1 },
-        { id: crypto.randomUUID(), col: 3, row: 2, colSpan: 1, rowSpan: 1 },
+        { id: uuid(), col: 1, row: 1, colSpan: 2, rowSpan: 2 },
+        { id: uuid(), col: 3, row: 1, colSpan: 1, rowSpan: 1 },
+        { id: uuid(), col: 3, row: 2, colSpan: 1, rowSpan: 1 },
       ],
       cell_assignments: {},
       _isNew: true,
@@ -91,7 +92,7 @@ export default function GridTemplateEditor({ onClose }) {
   const addCell = () => {
     setEditing((e) => ({
       ...e,
-      cells: [...e.cells, { id: crypto.randomUUID(), col: 1, row: 1, colSpan: 1, rowSpan: 1 }],
+      cells: [...e.cells, { id: uuid(), col: 1, row: 1, colSpan: 1, rowSpan: 1 }],
     }))
   }
 

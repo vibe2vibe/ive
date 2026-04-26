@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
-  X, Plus, Play, Pause, Square, Save, Trash2, Copy, ChevronDown,
+  X, Plus, Play, Pause, Square, Save, Trash2,
   Search, Code, GitBranch, CheckCircle, Eye, Zap, Wrench, Shield,
   Map, Clock, Settings, ArrowRight, RotateCcw, Sparkles,
 } from 'lucide-react'

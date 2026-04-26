@@ -569,6 +569,66 @@ def tool_search_memory(args: dict) -> str:
     return json.dumps(result, indent=2)
 
 
+_VALID_MEMORY_TYPES = {"user", "feedback", "project", "reference"}
+
+
+def tool_save_memory(args: dict) -> str:
+    """Persist a durable insight to the workspace memory pool (Commander side)."""
+    name = (args.get("name") or "").strip()
+    content = (args.get("content") or "").strip()
+    mem_type = (args.get("type") or "").strip()
+    tags = args.get("tags") or []
+    ws_id = args.get("workspace_id", WORKSPACE_ID)
+
+    if not name or not content:
+        return json.dumps({"ok": False, "error": "name and content are required"})
+    if mem_type not in _VALID_MEMORY_TYPES:
+        return json.dumps({"ok": False, "error": f"type must be one of {sorted(_VALID_MEMORY_TYPES)}"})
+
+    existing = api_call("GET", f"/memory?workspace_id={urllib.parse.quote(ws_id)}")
+    match_id = None
+    if isinstance(existing, list):
+        for e in existing:
+            if (e.get("name") or "").strip().lower() == name.lower() and (e.get("workspace_id") or "") == ws_id:
+                match_id = e.get("id")
+                break
+
+    body = {
+        "name": name, "type": mem_type, "content": content,
+        "workspace_id": ws_id or None, "tags": tags, "source_cli": "commander",
+    }
+    if match_id:
+        result = api_call("PUT", f"/memory/{match_id}", body)
+        if isinstance(result, dict) and result.get("error"):
+            return json.dumps({"ok": False, **result})
+        return json.dumps({"ok": True, "id": match_id, "updated": True})
+    result = api_call("POST", "/memory", body)
+    if isinstance(result, dict) and result.get("error"):
+        return json.dumps({"ok": False, **result})
+    return json.dumps({"ok": True, "id": (result or {}).get("id"), "created": True})
+
+
+def tool_headsup(args: dict) -> str:
+    """Commander-side headsup: non-blocking notice to a peer or worker."""
+    to = (args.get("to") or "all").strip() or "all"
+    message = (args.get("message") or "").strip()
+    topic = (args.get("topic") or "general").strip() or "general"
+    ws_id = args.get("workspace_id", WORKSPACE_ID)
+    if not message:
+        return json.dumps({"ok": False, "error": "message required"})
+    body = {
+        "from_session_id": "commander",
+        "content": message, "topic": topic, "priority": "heads_up",
+        "blocking": False,
+    }
+    if to and to not in ("all",):
+        body["to"] = to
+    result = api_call("POST", f"/workspaces/{ws_id}/peer-messages", body)
+    if isinstance(result, dict) and result.get("error"):
+        return json.dumps({"ok": False, **result})
+    return json.dumps({"ok": True, "id": (result or {}).get("id"), "to": to})
+
+
 def tool_list_worker_digests(args: dict) -> str:
     """Get a birds-eye view of what all workers are currently doing — their task, focus, decisions, discoveries, files touched, and domain tags."""
     ws_id = args.get("workspace_id", WORKSPACE_ID)
@@ -619,6 +679,38 @@ def tool_check_coordination(args: dict) -> str:
     return json.dumps(result, indent=2)
 
 
+# ─── Myelin coordination tools (commander side) ─────────────────────────
+# Mirror of the worker-side tools so commander can also coordinate
+# (e.g. before dispatching a worker, or while doing its own edits).
+
+_COMMANDER_AGENT_ID = f"commander_{WORKSPACE_ID or 'global'}"
+
+
+def tool_coord_check_overlap(args: dict) -> str:
+    from peer_comms import myelin_check_overlap
+    file_path = args.get("file_path", "")
+    intent = args.get("intent", "") or f"editing {file_path}"
+    return json.dumps(myelin_check_overlap(_COMMANDER_AGENT_ID, intent, file_path), indent=2)
+
+
+def tool_coord_acquire(args: dict) -> str:
+    from peer_comms import myelin_acquire
+    file_path = args.get("file_path", "")
+    intent = args.get("intent", "")
+    return json.dumps(myelin_acquire(_COMMANDER_AGENT_ID, file_path, intent), indent=2)
+
+
+def tool_coord_release(args: dict) -> str:
+    from peer_comms import myelin_release
+    file_path = args.get("file_path", "")
+    return json.dumps(myelin_release(_COMMANDER_AGENT_ID, file_path), indent=2)
+
+
+def tool_coord_peers(args: dict) -> str:
+    from peer_comms import myelin_peers
+    return json.dumps(myelin_peers(_COMMANDER_AGENT_ID), indent=2)
+
+
 # ─── Worker queue tools ────────────────────────────────────────────────────
 
 def tool_tag_session(args: dict) -> str:
@@ -667,7 +759,7 @@ def tool_request_docs_update(args: dict) -> str:
         if session_id:
             features_str = ", ".join(affected) if affected else "unspecified features"
             msg = f"Documentation update needed: {reason}. Affected features: {features_str}. Please check get_changes_since() and update relevant pages."
-            api_call("POST", f"/sessions/{session_id}/input", {"data": msg + "\n"})
+            api_call("POST", f"/sessions/{session_id}/input", {"message": msg})  # CR submits in raw-mode CLI TUIs (LF would leave it unsubmitted)
             return f"Docs update requested. Reason: {reason}. Message sent to Documentor session {session_id}."
 
     return f"Docs update event emitted. Reason: {reason}. No active Documentor session found — event is queued."
@@ -757,7 +849,7 @@ TOOLS = {
                 "model": {"type": "string", "enum": ["haiku", "sonnet", "opus"], "default": "sonnet"},
                 "permission_mode": {"type": "string", "default": "auto"},
                 "system_prompt": {"type": "string"},
-                "session_type": {"type": "string", "enum": ["worker", "test_worker"], "default": "worker", "description": "Session type. 'test_worker' auto-attaches Playwright MCP for browser testing."},
+                "session_type": {"type": "string", "enum": ["worker", "test_worker", "planner"], "default": "worker", "description": "Session type. 'test_worker' auto-attaches Playwright MCP for browser testing. 'planner' injects the Planner system prompt — use it to decompose vague/large tasks into sub-tasks; the planner stops after filing sub-tasks, never implements."},
                 "task_id": {"type": "string", "description": "Feature board task ID to assign to this worker. The worker gets MCP tools to update its own task status (planning/in_progress/review/done)."},
                 "plan_first": {"type": "boolean", "default": False, "description": "If true, worker must plan and wait for user approval before implementing."},
                 "ralph_loop": {"type": "boolean", "default": False, "description": "If true, worker uses Ralph mode — persistent execution loop that keeps going until all tests/build pass."},
@@ -1011,9 +1103,15 @@ if _app_setting("experimental_model_switching") == "on":
 TOOLS["search_memory"] = {
     "handler": tool_search_memory,
     "description": (
-        "Search across ALL workspace memory — past tasks with lessons learned, "
-        "session digests, knowledge base, peer messages, file activity. "
-        "Use this BEFORE creating tasks to check if similar work was done before."
+        "USE THIS BEFORE every routing decision. The workspace's accumulated "
+        "playbook lives here — past tasks with lessons learned, session digests, "
+        "knowledge base, peer messages, file activity. If a similar task was "
+        "routed last week and the worker hit a wall, that lesson is searchable "
+        "right now. Trigger checklist: (1) before creating a task — has this been "
+        "done before? (2) before picking a worker — which one succeeded at this "
+        "domain? (3) before escalating — was this same failure pattern seen "
+        "elsewhere? Memory is the workspace's playbook; reading it costs a few "
+        "tokens, ignoring it costs hours of repeated mistakes."
     ),
     "inputSchema": {
         "type": "object",
@@ -1046,6 +1144,52 @@ TOOLS["get_session_digest"] = {
         "required": ["session_id"],
     },
 }
+TOOLS["save_memory"] = {
+    "handler": tool_save_memory,
+    "description": (
+        "MEMORY IS YOUR PLAYBOOK — call this after every routing decision, escalation, "
+        "or completed task. Use this whenever something happened that a future Commander "
+        "should know: which worker succeeded at which domain, which model was needed for "
+        "this task class, what the user's preference was, what kept failing. "
+        "Trigger checklist: (1) finished routing a task → save type='project' with what "
+        "happened end-to-end. (2) user corrected your routing → save type='feedback'. "
+        "(3) discovered a worker is great at X → save type='reference'. (4) escalated to "
+        "max model and still failed → save type='project' with the failure pattern. "
+        "Idempotent on `name` — re-using a name updates instead of duplicating. "
+        "Skipping this means the next Commander has to relearn everything from scratch."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Short title (dedup key within workspace)."},
+            "type": {"type": "string", "enum": ["user", "feedback", "project", "reference"]},
+            "content": {"type": "string", "description": "The insight."},
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "workspace_id": {"type": "string"},
+        },
+        "required": ["name", "type", "content"],
+    },
+}
+TOOLS["headsup"] = {
+    "handler": tool_headsup,
+    "description": (
+        "Non-blocking notice to workers — fire and continue. Use when you want a worker "
+        "or all workers to SEE something but you're not waiting on them. Trigger checklist: "
+        "(1) reassigning a file area another worker was previously in. (2) merging two "
+        "tasks. (3) telling all workers the user changed direction. Set `to` to 'all' "
+        "or a specific session_id."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "to": {"type": "string", "description": "'all' or a specific session_id."},
+            "message": {"type": "string"},
+            "topic": {"type": "string", "description": "Topic tag. Default: general."},
+            "workspace_id": {"type": "string"},
+        },
+        "required": ["to", "message"],
+    },
+}
 TOOLS["check_coordination"] = {
     "handler": tool_check_coordination,
     "description": (
@@ -1063,6 +1207,56 @@ TOOLS["check_coordination"] = {
         "required": ["intent"],
     },
 }
+
+# Myelin coordination — gated on experimental flag. These let commander
+# directly query/announce in the shared coord graph (same primitives the
+# workers get). Useful when commander is doing its own edits or forming a
+# team and wants ground truth on who's already working on what.
+if _app_setting("experimental_myelin_coordination") == "on":
+    TOOLS["coord_check_overlap"] = {
+        "handler": tool_coord_check_overlap,
+        "description": (
+            "Check semantic overlap with active peer agents in the shared "
+            "coordination graph. Returns overlaps with score + level "
+            "(conflict/share/notify/tangent/unrelated)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "File you intend to edit."},
+                "intent": {"type": "string", "description": "Short description of intended work."},
+            },
+            "required": ["file_path", "intent"],
+        },
+    }
+    TOOLS["coord_acquire"] = {
+        "handler": tool_coord_acquire,
+        "description": "Best-effort claim: announce a task in the shared coordination graph.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "File being claimed."},
+                "intent": {"type": "string", "description": "Optional richer intent description."},
+            },
+            "required": ["file_path"],
+        },
+    }
+    TOOLS["coord_release"] = {
+        "handler": tool_coord_release,
+        "description": "Mark this agent's coord tasks for the file as completed.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "File you're done editing."},
+            },
+            "required": ["file_path"],
+        },
+    }
+    TOOLS["coord_peers"] = {
+        "handler": tool_coord_peers,
+        "description": "List active peer agents in the coordination namespace.",
+        "inputSchema": {"type": "object", "properties": {}},
+    }
 
 # Worker queue tools
 TOOLS["tag_session"] = {

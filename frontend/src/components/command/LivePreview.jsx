@@ -1,10 +1,14 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
-import { Camera, ExternalLink, X, Loader2, RefreshCw, Maximize2, Minimize2, Mic, StickyNote, Trash2, Zap, ChevronRight, Download, Paperclip, Search } from 'lucide-react'
+import { Camera, ExternalLink, X, Loader2, RefreshCw, Maximize2, Minimize2, Mic, StickyNote, Trash2, Zap, ChevronRight, Download, Paperclip, Search, Server } from 'lucide-react'
 import useStore from '../../state/store'
-import { api } from '../../lib/api'
+import { api, rewriteLocalPreviewUrl, demoApi, localPreviewUrl } from '../../lib/api'
+import DemoPanel from './DemoPanel'
 
 export default function LivePreview({ url: initialUrl, taskId: initialTaskId, onScreenshot, onClose }) {
-  const [currentUrl, setCurrentUrl] = useState(initialUrl)
+  // When IVE is served via Cloudflare tunnel / multiplayer mode, localhost
+  // URLs from worker dev servers must be routed through `/preview/<port>/`
+  // — the visitor's browser can't resolve `localhost` on the host machine.
+  const [currentUrl, setCurrentUrl] = useState(rewriteLocalPreviewUrl(initialUrl))
   const [loading, setLoading] = useState(true)
   const [capturing, setCapturing] = useState(false)
   const [error, setError] = useState(null)
@@ -41,6 +45,64 @@ export default function LivePreview({ url: initialUrl, taskId: initialTaskId, on
 
   const wsId = activeWorkspaceId || workspaces[0]?.id
 
+  // ── Demo runner integration ─────────────────────────────
+  const [demoOpen, setDemoOpen] = useState(false)
+  const [demoStatus, setDemoStatus] = useState(null)
+  const [pullingDemo, setPullingDemo] = useState(false)
+
+  // Light poll for demo status while panel is open. Live ws updates also
+  // come through DemoPanel — this just keeps the toolbar badge fresh.
+  useEffect(() => {
+    if (!wsId) return
+    let cancelled = false
+    async function fetchOnce() {
+      try {
+        const d = await demoApi.status(wsId)
+        if (!cancelled) setDemoStatus(d)
+      } catch { /* ignore */ }
+    }
+    fetchOnce()
+    const t = setInterval(fetchOnce, 5000)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [wsId])
+
+  // Subscribe to ws demo_state messages so the badge updates instantly
+  // even when DemoPanel isn't mounted.
+  useEffect(() => {
+    if (!globalWs) return
+    function onMsg(e) {
+      let data
+      try { data = JSON.parse(e.data) } catch { return }
+      if (data.type === 'demo_state' && data.demo?.workspace_id === wsId) {
+        setDemoStatus(data.demo)
+      }
+    }
+    globalWs.addEventListener('message', onMsg)
+    return () => globalWs.removeEventListener('message', onMsg)
+  }, [globalWs, wsId])
+
+  const handlePullLatest = useCallback(async () => {
+    if (!wsId) return
+    setPullingDemo(true)
+    try {
+      const d = await demoApi.pullLatest(wsId)
+      setDemoStatus(d)
+    } catch (e) {
+      setError(`Pull failed: ${e.message}`)
+      setTimeout(() => setError(null), 4000)
+    } finally {
+      setPullingDemo(false)
+    }
+  }, [wsId])
+
+  // If user hasn't typed a URL and a demo is running, autofill from the
+  // demo's port (routed through the preview proxy on tunnel origins).
+  useEffect(() => {
+    if (!demoStatus || demoStatus.status !== 'running' || !demoStatus.port) return
+    if (currentUrl && currentUrl !== 'about:blank' && currentUrl !== '') return
+    setCurrentUrl(localPreviewUrl(demoStatus.port, '/'))
+  }, [demoStatus, currentUrl])
+
   // Tasks for current workspace, sorted by most recent
   const workspaceTasks = useMemo(() => {
     return Object.values(tasks)
@@ -66,7 +128,7 @@ export default function LivePreview({ url: initialUrl, taskId: initialTaskId, on
 
     globalWs.send(JSON.stringify({
       action: 'preview_start',
-      url: initialUrl,
+      url: rewriteLocalPreviewUrl(initialUrl),
       width: Math.round(width),
       height: Math.round(height),
     }))
@@ -239,7 +301,8 @@ export default function LivePreview({ url: initialUrl, taskId: initialTaskId, on
   const doNavigate = useCallback((url) => {
     if (previewId && wsRef.current?.readyState === 1) {
       setLoading(true)
-      wsRef.current.send(JSON.stringify({ action: 'preview_navigate', preview_id: previewId, url }))
+      const u = rewriteLocalPreviewUrl(url)
+      wsRef.current.send(JSON.stringify({ action: 'preview_navigate', preview_id: previewId, url: u }))
       setTimeout(() => setLoading(false), 2000)
     }
   }, [previewId])
@@ -250,6 +313,8 @@ export default function LivePreview({ url: initialUrl, taskId: initialTaskId, on
     if (e.key === 'Enter') {
       let u = currentUrl.trim()
       if (u && !/^https?:\/\//i.test(u)) u = 'https://' + u
+      // Rewrite localhost → /preview/<port>/... when on a tunnel origin
+      u = rewriteLocalPreviewUrl(u)
       setCurrentUrl(u)
       doNavigate(u)
     }
@@ -529,6 +594,46 @@ export default function LivePreview({ url: initialUrl, taskId: initialTaskId, on
           <kbd className="text-[9px] text-indigo-400/50 bg-indigo-900/30 px-1 py-0.5 rounded">⌘↵</kbd>
         </button>
 
+        {/* Demo badge + Pull Latest */}
+        {demoStatus && demoStatus.status !== 'stopped' && (
+          <>
+            <span
+              className={`text-[9px] font-mono px-1.5 py-1 rounded border shrink-0 ${
+                demoStatus.status === 'running' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25'
+                : demoStatus.status === 'error' ? 'bg-red-500/10 text-red-400 border-red-500/25'
+                : 'bg-amber-500/10 text-amber-400 border-amber-500/25'
+              }`}
+              title={`Demo: ${demoStatus.status}${demoStatus.port ? ` on :${demoStatus.port}` : ''}`}
+            >
+              demo{demoStatus.last_commit ? ` @ ${demoStatus.last_commit.slice(0, 7)}` : ''}
+            </span>
+            <button
+              onClick={handlePullLatest}
+              disabled={pullingDemo || demoStatus.status === 'building'}
+              className="flex items-center gap-1 px-2 py-1.5 text-[10px] font-mono bg-indigo-600/15 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/25 rounded transition-colors disabled:opacity-40 shrink-0"
+              title="git pull + reinstall (if needed) + restart on same port"
+            >
+              {pullingDemo || demoStatus.status === 'building'
+                ? <Loader2 size={10} className="animate-spin" />
+                : <RefreshCw size={10} />}
+              Pull Latest
+            </button>
+          </>
+        )}
+
+        {/* Demo panel toggle */}
+        <button
+          onClick={() => setDemoOpen(!demoOpen)}
+          className={`relative flex items-center gap-1 px-2 py-1.5 text-[11px] font-mono rounded border transition-colors ${
+            demoOpen
+              ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+              : 'bg-zinc-800/50 border-zinc-700 text-zinc-500 hover:text-zinc-300'
+          }`}
+          title="Demo runner panel"
+        >
+          <Server size={12} />
+        </button>
+
         {/* Notes toggle */}
         <button onClick={() => setNotesOpen(!notesOpen)}
           className={`relative flex items-center gap-1 px-2 py-1.5 text-[11px] font-mono rounded border transition-colors ${
@@ -634,6 +739,15 @@ export default function LivePreview({ url: initialUrl, taskId: initialTaskId, on
             </div>
           )}
         </div>
+
+        {/* ── Demo panel (right sidebar) ────────────────── */}
+        {demoOpen && wsId && (
+          <DemoPanel
+            workspaceId={wsId}
+            onClose={() => setDemoOpen(false)}
+            onPreviewUrl={(u) => { setCurrentUrl(u); doNavigate(u) }}
+          />
+        )}
 
         {/* ── Notes panel (right sidebar) ───────────────── */}
         {notesOpen && (

@@ -13,7 +13,6 @@ import json
 import re
 import time
 import logging
-import os
 import aiohttp
 
 log = logging.getLogger(__name__)

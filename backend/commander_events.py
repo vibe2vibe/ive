@@ -152,6 +152,11 @@ class CommanderEvent(str, Enum):
     OBSERVATORY_FINDING_CREATED = "observatory_finding_created"
     OBSERVATORY_FINDING_PROMOTED = "observatory_finding_promoted"
 
+    # ── Session Supervisor ─────────────────────────────────────────
+    SESSION_CRASHED           = "session_crashed"
+    SESSION_RESTART_ATTEMPTED = "session_restart_attempted"
+    SESSION_RESTART_FAILED    = "session_restart_failed"
+
 
 COMMANDER_EVENT_LABELS: dict[CommanderEvent, str] = {
     # Task board
@@ -252,6 +257,10 @@ COMMANDER_EVENT_LABELS: dict[CommanderEvent, str] = {
     CommanderEvent.OBSERVATORY_SCAN_COMPLETED:  "Observatory scan completed",
     CommanderEvent.OBSERVATORY_FINDING_CREATED: "Observatory finding created",
     CommanderEvent.OBSERVATORY_FINDING_PROMOTED: "Observatory finding promoted to task",
+    # Session Supervisor
+    CommanderEvent.SESSION_CRASHED:           "Session process crashed unexpectedly",
+    CommanderEvent.SESSION_RESTART_ATTEMPTED: "Supervisor attempted to restart a session",
+    CommanderEvent.SESSION_RESTART_FAILED:    "Supervisor failed to restart a session",
 }
 
 
@@ -346,6 +355,10 @@ COMMANDER_EVENT_CATEGORIES: dict[CommanderEvent, str] = {
     CommanderEvent.OBSERVATORY_SCAN_COMPLETED:  "observatory",
     CommanderEvent.OBSERVATORY_FINDING_CREATED: "observatory",
     CommanderEvent.OBSERVATORY_FINDING_PROMOTED: "observatory",
+    # Session Supervisor
+    CommanderEvent.SESSION_CRASHED:           "session",
+    CommanderEvent.SESSION_RESTART_ATTEMPTED: "session",
+    CommanderEvent.SESSION_RESTART_FAILED:    "session",
 }
 
 

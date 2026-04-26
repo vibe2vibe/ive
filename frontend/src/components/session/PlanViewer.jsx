@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { FileText, X, Send, Save, CheckCircle, RefreshCw, Edit3, Eye, MessageSquare, Trash2 } from 'lucide-react'
 import useStore from '../../state/store'
-import { sendTerminalCommand, sendPlanChoice, sendPlanFeedback } from '../../lib/terminal'
+import { sendPlanChoice, sendPlanFeedback } from '../../lib/terminal'
 import { api } from '../../lib/api'
+import { uuid } from '../../lib/uuid'
 
 export default function PlanViewer({ onClose }) {
   const plan = useStore((s) => s.activePlan)
@@ -219,7 +220,7 @@ export default function PlanViewer({ onClose }) {
   const addComment = () => {
     if (!commentInput.trim() || !commentPopover) return
     setComments((prev) => [...prev, {
-      id: crypto.randomUUID(),
+      id: uuid(),
       selectedText: commentPopover.selectedText,
       comment: commentInput.trim(),
     }])

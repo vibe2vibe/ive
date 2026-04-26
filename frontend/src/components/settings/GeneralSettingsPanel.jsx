@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Settings, X, RefreshCw, Loader2, LayoutGrid, Columns, Rows, Grid2x2, Monitor, Maximize, Type } from 'lucide-react'
+import { Settings, X, RefreshCw, Loader2, Columns, Rows, Grid2x2, Maximize, Type } from 'lucide-react'
 import { api } from '../../lib/api'
 import useStore from '../../state/store'
 

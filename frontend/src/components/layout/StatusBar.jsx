@@ -90,18 +90,18 @@ export default function StatusBar() {
           </div>
 
           {allSessions.length > 0 && (
-            <span className="text-text-faint font-mono text-[10px]">{allSessions.length} sessions</span>
+            <span className="hidden sm:inline text-text-faint font-mono text-[10px]">{allSessions.length} sessions</span>
           )}
 
           {runningCount > 0 && (
             <span className="flex items-center gap-1 text-green-500 font-mono text-[10px]">
               <span className="w-1 h-1 rounded-full bg-green-500 animate-subtle-pulse" />
-              {runningCount} active
+              {runningCount}<span className="hidden sm:inline">&nbsp;active</span>
             </span>
           )}
 
           {totalCost > 0 && (
-            <span className="text-text-faint font-mono text-[10px]">${totalCost.toFixed(4)}</span>
+            <span className="hidden sm:inline text-text-faint font-mono text-[10px]">${totalCost.toFixed(4)}</span>
           )}
 
           <MailboxPill position="above" />
@@ -131,7 +131,7 @@ export default function StatusBar() {
                   </span>
                 )}
               </div>
-              <span className="text-text-faint font-mono text-[10px]">{peerCount + 1} online</span>
+              <span className="hidden sm:inline text-text-faint font-mono text-[10px]">{peerCount + 1} online</span>
             </div>
           )}
 
@@ -147,7 +147,7 @@ export default function StatusBar() {
               >
                 {myName?.[0]?.toUpperCase() || '?'}
               </span>
-              <span className="font-mono text-[10px] text-text-secondary max-w-[80px] truncate">{myName || 'Anonymous'}</span>
+              <span className="hidden sm:inline font-mono text-[10px] text-text-secondary max-w-[80px] truncate">{myName || 'Anonymous'}</span>
             </button>
             {showIdentity && <IdentityEditor onClose={() => setShowIdentity(false)} />}
           </div>

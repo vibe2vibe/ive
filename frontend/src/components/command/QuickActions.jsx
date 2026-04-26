@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
 import {
   GitBranch, Shield, FileCode, Bug, TestTube,
   BookOpen, Lightbulb, GripVertical, Settings2, Check,

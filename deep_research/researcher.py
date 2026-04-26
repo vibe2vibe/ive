@@ -150,6 +150,31 @@ class DeepResearcher:
                     except asyncio.QueueEmpty:
                         break
 
+            # Drain server-written steer file: <output_dir>/steer-<entry_id>.md
+            # The server's POST /research/jobs/:id/steer route appends queries here.
+            # We support both <output_dir>/steer-*.md (multi-job) and the legacy
+            # per-topic <out_dir>/steer.md from the --interactive CLI mode.
+            for steer_file in [
+                *Path(self.config.output_dir).glob("steer-*.md"),
+                out_dir / "steer.md",
+            ]:
+                if not steer_file.exists():
+                    continue
+                try:
+                    raw = steer_file.read_text().strip()
+                    file_qs = [
+                        ln.strip() for ln in raw.split("\n")
+                        if ln.strip() and not ln.strip().startswith("#")
+                    ]
+                    if file_qs:
+                        sub_qs.extend(file_qs)
+                        self._emit("steer", f"Drained {len(file_qs)} steered queries from {steer_file.name}",
+                                   round=iteration, consumed=True,
+                                   elapsed=int(time.time() - start))
+                    steer_file.unlink()  # consumed
+                except Exception as e:
+                    logger.warning("steer file read failed (%s): %s", steer_file, e)
+
             # Determine what to search — sub-queries + reformulations + cross-domain
             queries = list(sub_qs)
             queries.extend(reformulations)

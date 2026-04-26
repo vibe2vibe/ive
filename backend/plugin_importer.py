@@ -18,7 +18,6 @@ from pathlib import Path
 
 import aiohttp
 
-from cli_features import HookEvent
 from cli_profiles import CLAUDE_PROFILE, GEMINI_PROFILE
 
 log = logging.getLogger(__name__)

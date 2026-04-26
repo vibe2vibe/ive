@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { FileText, Shield, X, Save, FolderOpen, ChevronRight } from 'lucide-react'
+import { FileText, Shield, X, Save, FolderOpen } from 'lucide-react'
 import { api } from '../../lib/api'
 import useStore from '../../state/store'
 

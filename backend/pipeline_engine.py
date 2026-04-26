@@ -551,7 +551,10 @@ async def _execute_agent_stage(
         await _fail_stage(run_id, stage_id, "Session PTY not running")
         return
 
-    data = (prompt + "\n").encode("utf-8")
+    # CR (\r), not LF — raw-mode CLI TUIs interpret \r as Enter; \n leaves
+    # the prompt sitting in the buffer unsubmitted, which previously made
+    # workers appear to "finish" with no tool uses.
+    data = (prompt + "\r").encode("utf-8")
     _pty_manager.write(session_id, data)
     logger.info("Pipeline %s: sent prompt to session %s for stage '%s'",
                 run_id[:8], session_id[:8], stage.get("name"))

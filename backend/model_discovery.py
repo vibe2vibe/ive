@@ -15,9 +15,7 @@ Gemini: Queries the Google GenAI REST API using GEMINI_API_KEY / GOOGLE_API_KEY,
 import json
 import logging
 import os
-import subprocess
 import urllib.request
-import urllib.error
 
 logger = logging.getLogger(__name__)
 

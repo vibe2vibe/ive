@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronUp,
   Search,
+  Sparkles,
   X as XIcon,
 } from 'lucide-react'
 
@@ -43,7 +44,7 @@ const categoryStyles = {
   steal: 'bg-purple-500/15 text-purple-300 border-purple-500/30',
 }
 
-export default function FindingCard({ finding, onPromote, onStatusChange, onDragStart, onResearch }) {
+export default function FindingCard({ finding, onPromote, onStatusChange, onDragStart, onResearch, onDeepen }) {
   const [expanded, setExpanded] = useState(false)
 
   const SourceIcon = sourceIcons[finding.source] || Newspaper
@@ -221,6 +222,16 @@ export default function FindingCard({ finding, onPromote, onStatusChange, onDrag
             >
               <Search size={8} />
               Research
+            </button>
+          )}
+          {onDeepen && finding.status !== 'promoted' && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onDeepen(finding) }}
+              className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-mono text-pink-400 bg-pink-500/10 border border-pink-500/20 rounded hover:bg-pink-500/20 transition-colors"
+              title="Inject as steer query into active research, or start a new one"
+            >
+              <Sparkles size={8} />
+              Deepen
             </button>
           )}
           {finding.status !== 'promoted' && (

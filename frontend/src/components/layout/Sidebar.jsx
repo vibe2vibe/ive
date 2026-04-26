@@ -1,10 +1,10 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Plus, FolderOpen, MessageSquare, ChevronDown, ChevronRight, Trash2, Search, Crown, Kanban, GitCompareArrows, GripVertical, Shield, Server, Check, GitMerge, FlaskConical, BookOpenCheck, FileText, Pencil, Copy, ClipboardCopy, Square, ExternalLink, Download, Telescope, Archive, ArchiveRestore, Sparkles } from 'lucide-react'
 import MergeDialog from '../session/MergeDialog'
 import useStore from '../../state/store'
 import { api } from '../../lib/api'
 import { sendTerminalCommand } from '../../lib/terminal'
-import { MODELS, PERMISSION_MODES, EFFORT_LEVELS, GEMINI_MODELS, GEMINI_APPROVAL_MODES, CLI_TYPES, getWorkspaceColor, WORKSPACE_PALETTE, getModelsForCli, getPermissionModesForCli, getEffortLevelsForCli, getDefaultModel, getDefaultPermissionMode } from '../../lib/constants'
+import { MODELS, GEMINI_MODELS, CLI_TYPES, getWorkspaceColor, WORKSPACE_PALETTE, getModelsForCli, getPermissionModesForCli, getEffortLevelsForCli, getDefaultModel, getDefaultPermissionMode } from '../../lib/constants'
 import MailboxPill from './MailboxPill'
 
 function SessionContextMenu({ x, y, session, onClose }) {
@@ -818,6 +818,7 @@ export default function Sidebar() {
   const [showTesterPicker, setShowTesterPicker] = useState(false)
   const [showDocumentorPicker, setShowDocumentorPicker] = useState(false)
   const [docAllowAllEdits, setDocAllowAllEdits] = useState(false)
+  const [testerShowBrowser, setTesterShowBrowser] = useState(false)
   const [ctxMenu, setCtxMenu] = useState(null) // { x, y, session }
   const [newPath, setNewPath] = useState('')
   const [newSessionFor, setNewSessionFor] = useState(null)
@@ -972,7 +973,7 @@ export default function Sidebar() {
   const [archiveExpanded, setArchiveExpanded] = useState({})
 
   return (
-    <aside className="w-72 bg-bg-secondary border-r border-border-primary flex flex-col shrink-0">
+    <aside className="w-full md:w-72 bg-bg-secondary border-r border-border-primary flex flex-col shrink-0 min-w-0 flex-1 md:flex-initial">
       {/* Header */}
       <div className="px-3 pt-3 pb-2.5 border-b border-border-primary">
         <div className="flex items-center justify-between mb-2.5">
@@ -1500,10 +1501,10 @@ export default function Sidebar() {
         <div className="flex-1 relative">
           <button
             onClick={() => { setShowCommanderPicker((s) => !s); setShowTesterPicker(false); setShowDocumentorPicker(false) }}
-            className="w-full flex items-center justify-center gap-1 px-1.5 py-1 text-[11px] text-text-faint hover:text-amber-400 hover:bg-bg-hover rounded transition-colors"
+            className="w-full flex items-center justify-center gap-1.5 px-1.5 py-1.5 text-[11px] text-text-faint hover:text-amber-400 hover:bg-bg-hover rounded transition-colors"
             title="Start Commander (orchestrator agent)"
           >
-            <Crown size={11} />
+            <Crown size={13} />
             Commander
           </button>
           {showCommanderPicker && (
@@ -1542,10 +1543,10 @@ export default function Sidebar() {
         <div className="flex-1 relative">
           <button
             onClick={() => { setShowTesterPicker((s) => !s); setShowCommanderPicker(false); setShowDocumentorPicker(false) }}
-            className="w-full flex items-center justify-center gap-1 px-1.5 py-1 text-[11px] text-text-faint hover:text-cyan-400 hover:bg-bg-hover rounded transition-colors"
+            className="w-full flex items-center justify-center gap-1.5 px-1.5 py-1.5 text-[11px] text-text-faint hover:text-cyan-400 hover:bg-bg-hover rounded transition-colors"
             title="Start Testing Agent (Playwright, read-only)"
           >
-            <FlaskConical size={11} />
+            <FlaskConical size={13} />
             Tester
           </button>
           {showTesterPicker && (
@@ -1554,6 +1555,15 @@ export default function Sidebar() {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="text-[10px] text-text-faint font-medium uppercase tracking-wider px-1 mb-1">Create Testing Agent with:</div>
+              <label className="flex items-center gap-1.5 px-1 py-1 text-[10px] text-text-faint cursor-pointer hover:text-text-secondary">
+                <input
+                  type="checkbox"
+                  checked={testerShowBrowser}
+                  onChange={(e) => setTesterShowBrowser(e.target.checked)}
+                  className="rounded border-border-accent w-3 h-3"
+                />
+                Show browser (debug — runs headless by default)
+              </label>
               {[
                 { cli: 'claude', model: 'sonnet', label: 'Claude Sonnet', style: 'text-indigo-400 border-indigo-500/25 hover:bg-accent-subtle' },
                 { cli: 'claude', model: 'opus', label: 'Claude Opus', style: 'text-indigo-400 border-indigo-500/25 hover:bg-accent-subtle' },
@@ -1566,7 +1576,7 @@ export default function Sidebar() {
                     const wsId = useStore.getState().activeWorkspaceId || workspaces[0]?.id
                     if (wsId) {
                       try {
-                        const s = await api.startTester(wsId, { cli_type: opt.cli, model: opt.model })
+                        const s = await api.startTester(wsId, { cli_type: opt.cli, model: opt.model, show_browser: testerShowBrowser })
                         useStore.getState().setActiveWorkspace(s.workspace_id)
                         useStore.getState().addSession(s)
                       } catch (e) { console.error(e); useStore.getState().addNotification({ type: 'error', message: `Tester failed: ${e.message}` }) }
@@ -1583,10 +1593,10 @@ export default function Sidebar() {
         <div className="flex-1 relative">
           <button
             onClick={() => { setShowDocumentorPicker((s) => !s); setShowCommanderPicker(false); setShowTesterPicker(false) }}
-            className="w-full flex items-center justify-center gap-1 px-1.5 py-1 text-[11px] text-text-faint hover:text-emerald-400 hover:bg-bg-hover rounded transition-colors"
+            className="w-full flex items-center justify-center gap-1.5 px-1.5 py-1.5 text-[11px] text-text-faint hover:text-emerald-400 hover:bg-bg-hover rounded transition-colors"
             title="Start Documentor (documentation agent)"
           >
-            <BookOpenCheck size={11} />
+            <BookOpenCheck size={13} />
             Docs
           </button>
           {showDocumentorPicker && (
@@ -1640,40 +1650,40 @@ export default function Sidebar() {
           onClick={() => {
             window.dispatchEvent(new CustomEvent('open-panel', { detail: 'feature-board' }))
           }}
-          className="flex-1 flex items-center justify-center gap-1 px-1.5 py-1 text-[11px] text-text-faint hover:text-text-secondary hover:bg-bg-hover rounded transition-colors"
+          className="flex-1 flex items-center justify-center gap-1.5 px-1.5 py-1.5 text-[11px] text-text-faint hover:text-text-secondary hover:bg-bg-hover rounded transition-colors"
           title="Feature Board (⌘B)"
         >
-          <Kanban size={11} />
+          <Kanban size={13} />
           Board
         </button>
         <button
           onClick={() => {
             window.dispatchEvent(new CustomEvent('open-panel', { detail: 'pipeline-editor' }))
           }}
-          className="flex-1 flex items-center justify-center gap-1 px-1.5 py-1 text-[11px] text-text-faint hover:text-text-secondary hover:bg-bg-hover rounded transition-colors"
+          className="flex-1 flex items-center justify-center gap-1.5 px-1.5 py-1.5 text-[11px] text-text-faint hover:text-text-secondary hover:bg-bg-hover rounded transition-colors"
           title="Pipeline Editor (⌘⇧L)"
         >
-          <GitCompareArrows size={11} />
+          <GitCompareArrows size={13} />
           Pipelines
         </button>
         <button
           onClick={() => {
             window.dispatchEvent(new CustomEvent('open-panel', { detail: 'docs-panel' }))
           }}
-          className="flex-1 flex items-center justify-center gap-1 px-1.5 py-1 text-[11px] text-text-faint hover:text-emerald-400 hover:bg-bg-hover rounded transition-colors"
+          className="flex-1 flex items-center justify-center gap-1.5 px-1.5 py-1.5 text-[11px] text-text-faint hover:text-emerald-400 hover:bg-bg-hover rounded transition-colors"
           title="Documentation Dashboard"
         >
-          <FileText size={11} />
+          <FileText size={13} />
           Docs Hub
         </button>
         <button
           onClick={() => {
             window.dispatchEvent(new CustomEvent('open-panel', { detail: 'observatory' }))
           }}
-          className="flex-1 flex items-center justify-center gap-1 px-1.5 py-1 text-[11px] text-text-faint hover:text-cyan-400 hover:bg-bg-hover rounded transition-colors"
+          className="flex-1 flex items-center justify-center gap-1.5 px-1.5 py-1.5 text-[11px] text-text-faint hover:text-cyan-400 hover:bg-bg-hover rounded transition-colors"
           title="Observatory (⌘⇧O)"
         >
-          <Telescope size={11} />
+          <Telescope size={13} />
           Observe
         </button>
       </div>

@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import {
-  X, Plus, Search, Play, Trash2, Send, RefreshCw, Clock, History,
+  X, Plus, Search, Play, Trash2, Send, RefreshCw, History,
   ChevronDown, ChevronRight, ExternalLink, Globe, Tag, ZoomIn,
   Telescope, BookOpen, ToggleLeft, ToggleRight,
   GitBranch, Rocket, Newspaper, Layers, Loader2, Shuffle, Users,
-  Lightbulb, Copy, Timer, Settings, ArrowUpRight, Activity,
+  Copy, Timer, Settings, ArrowUpRight, Activity,
 } from 'lucide-react'
 import { api } from '../../lib/api'
 import useStore from '../../state/store'
@@ -74,8 +74,11 @@ export default function ResearchHub({ onClose, initialTab = 'library' }) {
 
   // ── Active ────────────────────────────────────────────────
   const [jobs, setJobs] = useState([])
-  const [steerInput, setSteerInput] = useState('')
-  const [steerSending, setSteerSending] = useState(false)
+  const [steerInputs, setSteerInputs] = useState({})    // per-job draft text
+  const [steerSending, setSteerSending] = useState({})   // per-job send-in-flight
+  const [pendingSteers, setPendingSteers] = useState({}) // per-job queued queries
+  const [awaiting, setAwaiting] = useState({})          // per-entry-id { round, next_round, total_rounds, findings_count, elapsed }
+  const [resumeSending, setResumeSending] = useState({})// per-job resume-in-flight
 
   // ── Library ───────────────────────────────────────────────
   const [entries, setEntries] = useState([])
@@ -90,6 +93,7 @@ export default function ResearchHub({ onClose, initialTab = 'library' }) {
   const [newTopic, setNewTopic] = useState('')
   const [depth, setDepth] = useState('standard')
   const [crossTemporal, setCrossTemporal] = useState(false)
+  const [interactive, setInteractive] = useState(false)
   const [plan, setPlan] = useState(null)
   const [planLoading, setPlanLoading] = useState(false)
 
@@ -185,6 +189,33 @@ export default function ResearchHub({ onClose, initialTab = 'library' }) {
           }].slice(-200),
         }
       })
+      // When the loop reports it consumed steered queries, drain the pending chips
+      if (d.phase === 'steer' && d.consumed && d.job_id) {
+        setPendingSteers((m) => ({ ...m, [d.job_id]: [] }))
+      }
+      // Awaiting: agent paused and is waiting for human to resume.
+      if (d.phase === 'awaiting' && !d.auto_resumed) {
+        setAwaiting((m) => ({
+          ...m,
+          [d.entry_id]: {
+            job_id: d.job_id,
+            round: d.round,
+            next_round: d.next_round,
+            total_rounds: d.total_rounds,
+            findings_count: d.findings_count,
+            elapsed: d.elapsed,
+            proposed_queries: d.proposed_queries || [],
+          },
+        }))
+      }
+      // Any non-steer/awaiting phase event after awaiting means the loop resumed.
+      else if (d.phase && d.phase !== 'awaiting' && d.phase !== 'steer') {
+        setAwaiting((m) => {
+          if (!m[d.entry_id]) return m
+          const { [d.entry_id]: _, ...rest } = m
+          return rest
+        })
+      }
     }
 
     const onDone = (e) => {
@@ -301,7 +332,8 @@ export default function ResearchHub({ onClose, initialTab = 'library' }) {
       if (created?.id) {
         const res = await api.startResearch({
           query: newTopic.trim(), entry_id: created.id, workspace_id: activeWorkspaceId,
-          depth, cross_temporal: crossTemporal, plan: plan || undefined,
+          depth, cross_temporal: crossTemporal, interactive,
+          plan: plan || undefined,
         })
         if (res?.job_id) setActiveJobId(res.job_id)
       }
@@ -346,12 +378,75 @@ export default function ResearchHub({ onClose, initialTab = 'library' }) {
   }
 
   // Active: steer
-  const handleSteer = async () => {
-    if (!steerInput.trim() || !activeJobId) return
-    const queries = steerInput.split(/[\n;]/).map((q) => q.trim()).filter(Boolean)
+  const handleSteer = async (jobId) => {
+    if (!jobId) return
+    const draft = (steerInputs[jobId] || '').trim()
+    if (!draft) return
+    const queries = draft.split(/[\n;]/).map((q) => q.trim()).filter(Boolean)
     if (!queries.length) return
-    setSteerSending(true)
-    try { await api.steerResearchJob(activeJobId, queries); setSteerInput('') } catch {} finally { setSteerSending(false) }
+    setSteerSending((m) => ({ ...m, [jobId]: true }))
+    try {
+      await api.steerResearchJob(jobId, queries)
+      setSteerInputs((m) => ({ ...m, [jobId]: '' }))
+      setPendingSteers((m) => ({ ...m, [jobId]: [...(m[jobId] || []), ...queries] }))
+    } catch {}
+    finally { setSteerSending((m) => ({ ...m, [jobId]: false })) }
+  }
+  const removePending = (jobId, idx) => {
+    setPendingSteers((m) => ({ ...m, [jobId]: (m[jobId] || []).filter((_, i) => i !== idx) }))
+  }
+
+  // Active: resume a paused interactive job
+  const handleResume = async (jobId, entryId, opts = {}) => {
+    if (!jobId) return
+    const draft = (steerInputs[jobId] || '').trim()
+    const queries = draft
+      ? draft.split(/[\n;]/).map((q) => q.trim()).filter(Boolean)
+      : []
+    setResumeSending((m) => ({ ...m, [jobId]: true }))
+    try {
+      await api.resumeResearchJob(jobId, opts.skip ? { skip: true } : { queries })
+      if (queries.length) {
+        setPendingSteers((m) => ({ ...m, [jobId]: [...(m[jobId] || []), ...queries] }))
+      }
+      setSteerInputs((m) => ({ ...m, [jobId]: '' }))
+      // Optimistically clear awaiting so the UI doesn't lag the next "search" event.
+      if (entryId) {
+        setAwaiting((m) => {
+          if (!m[entryId]) return m
+          const { [entryId]: _, ...rest } = m
+          return rest
+        })
+      }
+    } catch {}
+    finally { setResumeSending((m) => ({ ...m, [jobId]: false })) }
+  }
+
+  // Findings: deepen — if a research job is running, offer to steer it;
+  // otherwise prefill a new-research draft with the finding as seed.
+  const handleDeepenFinding = async (finding) => {
+    const text = `Investigate further: ${finding.title}${finding.proposal ? ` — ${String(finding.proposal).slice(0, 200)}` : ''}`
+    const running = jobs.find((j) => j.status === 'running')
+    if (running) {
+      const ok = window.confirm(
+        `A research job is currently running ("${(running.query || '').slice(0, 60)}…").\n\n` +
+        `OK → inject this as a steer query into that job\n` +
+        `Cancel → start a new research instead`,
+      )
+      if (ok) {
+        try {
+          await api.steerResearchJob(running.job_id, [text])
+          setPendingSteers((m) => ({ ...m, [running.job_id]: [...(m[running.job_id] || []), text] }))
+          setTab('active')
+        } catch {}
+        return
+      }
+    }
+    // Prefill a new research draft. The create form renders above the active
+    // tab, so the user stays where they are and just sees the form open.
+    setNewTopic(text)
+    setShowCreate(true)
+    requestAnimationFrame(() => topicRef.current?.focus())
   }
 
   // Schedules
@@ -485,6 +580,14 @@ export default function ResearchHub({ onClose, initialTab = 'library' }) {
                 <input type="checkbox" checked={crossTemporal} onChange={(e) => setCrossTemporal(e.target.checked)}
                   className="w-3 h-3 rounded border-border-primary accent-cyan-500" />
                 <History size={9} /> cross-temporal
+              </label>
+              <label
+                className="flex items-center gap-1 text-[10px] text-text-faint cursor-pointer hover:text-text-secondary"
+                title="Pause between rounds so you can review findings and inject sub-queries before the agent continues. CLI-brain mode only."
+              >
+                <input type="checkbox" checked={interactive} onChange={(e) => setInteractive(e.target.checked)}
+                  className="w-3 h-3 rounded border-border-primary accent-amber-400" />
+                <Activity size={9} /> pause for steering each round
               </label>
             </div>
             {plan && (
@@ -644,7 +747,8 @@ export default function ResearchHub({ onClose, initialTab = 'library' }) {
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
                     {filteredFindings.map((f) => (
                       <FindingCard key={f.id} finding={f}
-                        onPromote={handlePromoteFinding} onStatusChange={handleFindingStatus} onResearch={handleResearchFinding} />
+                        onPromote={handlePromoteFinding} onStatusChange={handleFindingStatus}
+                        onResearch={handleResearchFinding} onDeepen={handleDeepenFinding} />
                     ))}
                   </div>
                 )}
@@ -678,13 +782,27 @@ export default function ResearchHub({ onClose, initialTab = 'library' }) {
               {runningJobs.map((job) => {
                 const lines = progressLog[job.entry_id] || []
                 const lastPhase = [...lines].reverse().find((l) => l.phase)
+                const pending = pendingSteers[job.job_id] || []
+                const draft = steerInputs[job.job_id] || ''
+                const wait = awaiting[job.entry_id]
+                const cardCls = wait
+                  ? 'border border-amber-500/40 ring-1 ring-amber-500/20 rounded-lg bg-bg-elevated overflow-hidden'
+                  : 'border border-border-primary rounded-lg bg-bg-elevated overflow-hidden'
                 return (
-                  <div key={job.job_id} className="border border-border-primary rounded-lg bg-bg-elevated overflow-hidden">
+                  <div key={job.job_id} className={cardCls}>
+                    {/* Header */}
                     <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border-secondary">
-                      <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                      <span className={`inline-block w-2 h-2 rounded-full animate-pulse ${wait ? 'bg-amber-400' : 'bg-cyan-400'}`} />
                       <span className="text-xs text-text-primary font-medium flex-1 truncate">{job.query || job.topic || 'Research'}</span>
-                      <span className="text-[10px] text-text-faint font-mono">{job.status}</span>
+                      {job.interactive && (
+                        <span className="text-[9px] uppercase tracking-wider text-amber-400/80 px-1.5 py-0.5 bg-amber-500/8 rounded border border-amber-500/15 font-mono" title="Pauses each round for your review">
+                          interactive
+                        </span>
+                      )}
+                      <span className="text-[10px] text-text-faint font-mono">{wait ? 'awaiting you' : job.status}</span>
                     </div>
+
+                    {/* Phase row */}
                     {lastPhase && (
                       <div className="flex items-center gap-2 px-4 py-1.5 bg-bg-primary border-b border-border-secondary">
                         <div className={`w-1.5 h-1.5 rounded-full ${PHASE_COLOR[lastPhase.phase] || 'bg-gray-500'} animate-pulse`} />
@@ -699,25 +817,109 @@ export default function ResearchHub({ onClose, initialTab = 'library' }) {
                         )}
                       </div>
                     )}
+
+                    {/* Awaiting banner — only when paused */}
+                    {wait && (
+                      <div className="px-4 py-3 bg-amber-500/5 border-b border-amber-500/20 space-y-2">
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-xs font-medium text-amber-300">
+                            Round {wait.round} done — agent is waiting for you
+                          </span>
+                          {wait.findings_count != null && (
+                            <span className="text-[10px] text-text-faint">{wait.findings_count} findings so far</span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-text-faint leading-relaxed">
+                          Add sub-queries below to steer round {wait.next_round}, or skip to let the agent decide.
+                        </div>
+                        {Array.isArray(wait.proposed_queries) && wait.proposed_queries.length > 0 && (
+                          <div className="space-y-1">
+                            <div className="text-[9px] uppercase tracking-wider text-text-faint font-mono">Agent proposes:</div>
+                            <ul className="space-y-0.5">
+                              {wait.proposed_queries.map((q, i) => (
+                                <li key={i} className="text-[10px] text-text-secondary font-mono pl-3 border-l border-amber-500/30">
+                                  {q}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            onClick={() => handleResume(job.job_id, job.entry_id)}
+                            disabled={resumeSending[job.job_id]}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium bg-amber-500 hover:bg-amber-400 text-zinc-900 rounded-md transition-colors disabled:opacity-40"
+                          >
+                            {resumeSending[job.job_id] ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />}
+                            {draft.trim() ? `Resume with ${draft.split(/[\n;]/).filter((s) => s.trim()).length} steers` : 'Resume next round'}
+                          </button>
+                          <button
+                            onClick={() => handleResume(job.job_id, job.entry_id, { skip: true })}
+                            disabled={resumeSending[job.job_id]}
+                            className="px-2.5 py-1.5 text-[11px] text-text-faint hover:text-text-secondary border border-border-secondary hover:border-border-primary rounded-md transition-colors"
+                            title="Resume without injecting any steers"
+                          >
+                            Skip
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Progress log */}
                     <div className="px-4 py-2 max-h-32 overflow-y-auto font-mono text-[10px] leading-relaxed bg-bg-inset">
                       {lines.length ? lines.map((l, i) => (
                         <div key={i} className={`flex gap-2 ${l.done ? 'text-green-400' : l.start ? 'text-cyan-400' : 'text-text-muted'}`}>
                           <span className="text-text-faint shrink-0">{l.ts}</span>
                           {l.phase && <span className="text-text-faint shrink-0 w-3 text-center">{PHASE_ICON[l.phase] || '·'}</span>}
-                          <span className={l.line.startsWith('Tool:') ? 'text-amber-400/80' : l.phase === 'steer' ? 'text-pink-400' : ''}>{l.line}</span>
+                          <span className={l.line.startsWith('Tool:') ? 'text-amber-400/80' : l.phase === 'steer' ? 'text-pink-400' : l.phase === 'awaiting' ? 'text-amber-300' : ''}>{l.line}</span>
                         </div>
                       )) : <div className="text-text-faint">Waiting for progress...</div>}
                       <div ref={progressEndRef} />
                     </div>
-                    <div className="flex items-center gap-2 px-4 py-2 border-t border-border-secondary">
-                      <input value={steerInput} onChange={(e) => setSteerInput(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSteer() }}
-                        placeholder="Inject sub-queries to steer research..."
-                        className="flex-1 px-2 py-1 text-[11px] bg-bg-inset border border-border-secondary rounded text-text-primary placeholder-text-faint focus:outline-none ide-focus-ring font-mono" />
-                      <button onClick={handleSteer} disabled={steerSending || !steerInput.trim()}
-                        className="flex items-center gap-1 px-2 py-1 text-[11px] bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 rounded transition-colors disabled:opacity-40">
-                        {steerSending ? <Loader2 size={10} className="animate-spin" /> : <Send size={10} />} Steer
-                      </button>
+
+                    {/* Steer / queued chips / textarea */}
+                    <div className="px-4 py-2 border-t border-border-secondary space-y-1.5">
+                      {pending.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1">
+                          <span className="text-[9px] uppercase tracking-wider text-text-faint font-mono py-0.5">
+                            {wait ? 'Will inject on resume:' : 'Queued for next round:'}
+                          </span>
+                          {pending.map((q, i) => (
+                            <span key={i} className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] bg-pink-500/10 text-pink-400 border border-pink-500/20 rounded font-mono">
+                              {q}
+                              <button onClick={() => removePending(job.job_id, i)} className="hover:text-pink-200" title="Remove (UI only — already sent)">
+                                <X size={9} />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex items-start gap-2">
+                        <textarea
+                          value={draft}
+                          onChange={(e) => setSteerInputs((m) => ({ ...m, [job.job_id]: e.target.value }))}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                              e.preventDefault()
+                              wait ? handleResume(job.job_id, job.entry_id) : handleSteer(job.job_id)
+                            }
+                          }}
+                          placeholder={wait
+                            ? 'Type sub-queries to inject when you resume (one per line)'
+                            : 'Inject sub-queries — one per line — picked up next round'}
+                          rows={2}
+                          className="flex-1 px-2 py-1 text-[11px] bg-bg-inset border border-border-secondary rounded text-text-primary placeholder-text-faint focus:outline-none ide-focus-ring font-mono resize-none" />
+                        {!wait && (
+                          <div className="flex flex-col items-stretch gap-1">
+                            <button onClick={() => handleSteer(job.job_id)}
+                              disabled={steerSending[job.job_id] || !draft.trim()}
+                              className="flex items-center justify-center gap-1 px-2 py-1 text-[11px] bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 rounded transition-colors disabled:opacity-40">
+                              {steerSending[job.job_id] ? <Loader2 size={10} className="animate-spin" /> : <Send size={10} />} Steer
+                            </button>
+                            <span className="text-[9px] text-text-faint font-mono text-center">⌘↵</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )

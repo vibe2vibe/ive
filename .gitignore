@@ -1,6 +1,9 @@
 # Build output
 dist/
 build/
+frontend/dist/
+frontend/dist/.build-hash
+dist-bundle/
 
 # Internal project docs (not for public repo)
 CLAUDE.md
@@ -16,14 +19,21 @@ W2WCOMMS.md
 
 # OS files
 **/.DS_Store
+.DS_Store
 
 # Node
 **/node_modules/
+node_modules/
 
 # Python
 **/__pycache__/
+__pycache__/
 *.pyc
 *.pyo
+*.pyd
+
+# Backend dep marker
+backend/.deps-installed
 
 # Test files
 backend/tests/
@@ -31,6 +41,7 @@ backend/tests/
 # Database
 *.db
 *.sqlite
+*.sqlite3
 
 # Build scripts (internal)
 build.sh
@@ -44,6 +55,8 @@ video/
 
 # Env files
 .env
+.env.local
+.env.*.local
 .env.*
 
 # Downloaded agent skills
@@ -55,3 +68,19 @@ docs/.vitepress/cache/
 
 # Local lock files
 skills-lock.json
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# Native build artifacts
+*.dmg
+*.app
+*.exe
+target/
+
+# Marketing site upload scripts (contain Supabase service-role keys)
+marketing_material/website/upload.mjs
+marketing_material/website/upload.html
+marketing_material/website/upload_to_supabase.py

@@ -10,7 +10,6 @@ set_pty_manager()/set_broadcast_fn() inject dependencies at startup.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 
 from commander_events import CommanderEvent

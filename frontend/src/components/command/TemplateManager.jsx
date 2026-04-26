@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Layout, Trash2, X, Copy, MessageSquare } from 'lucide-react'
+import { Layout, Trash2, X, MessageSquare } from 'lucide-react'
 import { api } from '../../lib/api'
 import useListKeyboardNav from '../../hooks/useListKeyboardNav'
 

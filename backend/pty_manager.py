@@ -14,6 +14,9 @@ from typing import Callable, Optional
 logger = logging.getLogger(__name__)
 
 
+_OUTPUT_BUFFER_MAX = 256 * 1024  # 256KB rolling cache per session for late-joining viewers
+
+
 class PTYSession:
     def __init__(self, session_id: str, workspace_path: str,
                  cols: int = 120, rows: int = 40, cmd_args: list[str] | None = None,
@@ -31,6 +34,11 @@ class PTYSession:
         self._fd_lock = threading.Lock()  # serialize write() vs _close_fd()
         self._output_cb: Optional[Callable] = None
         self._exit_cb: Optional[Callable] = None
+        # Rolling output cache so a viewer that mounts after start_pty (e.g. a
+        # grid cell rendering an already-alive session) can be brought up to
+        # the current TUI state — without it the terminal stays blank until
+        # the CLI happens to write fresh bytes.
+        self._output_cache = bytearray()
 
     async def start(self, output_cb: Callable, exit_cb: Callable):
         self._output_cb = output_cb
@@ -93,10 +101,18 @@ class PTYSession:
     def _on_readable(self):
         try:
             data = os.read(self.master_fd, 65536)
-            if data and self._output_cb:
-                asyncio.ensure_future(self._output_cb(self.session_id, data))
+            if data:
+                self._output_cache.extend(data)
+                overflow = len(self._output_cache) - _OUTPUT_BUFFER_MAX
+                if overflow > 0:
+                    del self._output_cache[:overflow]
+                if self._output_cb:
+                    asyncio.ensure_future(self._output_cb(self.session_id, data))
         except (OSError, IOError) as e:
             logger.debug(f"PTY read: {e}")
+
+    def get_cached_output(self) -> bytes:
+        return bytes(self._output_cache)
 
     async def _wait_exit(self):
         while self._alive:
@@ -237,6 +253,10 @@ class PTYManager:
 
     def is_alive(self, session_id: str) -> bool:
         return session_id in self._sessions
+
+    def get_cached_output(self, session_id: str) -> bytes:
+        s = self._sessions.get(session_id)
+        return s.get_cached_output() if s else b""
 
     async def stop_session(self, session_id: str):
         s = self._sessions.get(session_id)

@@ -218,7 +218,7 @@ export default function SessionTabs() {
 
   return (
     <>
-      <div className="flex items-stretch bg-bg-inset border-b border-border-primary text-xs select-none">
+      <div className="flex items-stretch bg-bg-inset border-b border-border-primary text-xs select-none min-h-[44px] md:min-h-0 touch-manipulation">
         {/* Home icon */}
         <button
           data-chrome-button
@@ -238,10 +238,10 @@ export default function SessionTabs() {
         <button
           data-chrome-button
           onClick={() => setTabScope(tabScope === 'project' ? 'workspace' : 'project')}
-          className="flex items-center gap-1 px-2 shrink-0 text-text-faint hover:text-text-secondary border-r border-border-secondary transition-colors"
+          className="flex items-center gap-1 px-2.5 shrink-0 text-text-faint hover:text-text-secondary border-r border-border-secondary transition-colors"
           title={tabScope === 'project' ? 'Showing all tabs — click for workspace only' : 'Showing workspace tabs — click for all'}
         >
-          {tabScope === 'project' ? <Globe size={11} /> : <FolderOpen size={11} />}
+          {tabScope === 'project' ? <Globe size={14} /> : <FolderOpen size={14} />}
         </button>
 
         {/* Grid/tabs view toggle */}
@@ -250,12 +250,12 @@ export default function SessionTabs() {
           onClick={() => {
             useStore.getState().setViewMode(viewMode === 'tabs' ? 'grid' : 'tabs')
           }}
-          className={`flex items-center gap-1 px-2 shrink-0 border-r border-border-secondary transition-colors ${
+          className={`flex items-center gap-1 px-2.5 shrink-0 border-r border-border-secondary transition-colors ${
             viewMode === 'grid' ? 'text-accent-primary' : 'text-text-faint hover:text-text-secondary'
           }`}
           title={viewMode === 'grid' ? 'Grid view — click for tabs' : 'Tabs view — click for grid'}
         >
-          <LayoutGrid size={11} />
+          <LayoutGrid size={14} />
         </button>
 
         {/* Grid layout dropdown (only visible in grid mode) */}
@@ -362,7 +362,7 @@ export default function SessionTabs() {
         {canScrollLeft && (
           <button
             onClick={() => scrollBy(-1)}
-            className="flex items-center px-1 shrink-0 text-text-secondary hover:text-text-primary bg-bg-inset hover:bg-bg-secondary/50 border-r border-border-secondary transition-colors z-10"
+            className="hidden md:flex items-center px-1 shrink-0 text-text-secondary hover:text-text-primary bg-bg-inset hover:bg-bg-secondary/50 border-r border-border-secondary transition-colors z-10"
             title="Scroll tabs left"
           >
             <ChevronLeft size={14} />
@@ -372,9 +372,9 @@ export default function SessionTabs() {
         {/* Scrollable tab area */}
         <div
           ref={scrollRef}
-          className="flex-1 flex items-stretch overflow-x-auto min-w-0 tab-scroll-hide"
+          className="flex-1 flex items-stretch overflow-x-auto min-w-0 tab-scroll-hide touch-manipulation"
           onScroll={updateScrollState}
-          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}
         >
         {visibleTabs.map((id, idx) => {
           const session = sessions[id]
@@ -563,7 +563,7 @@ export default function SessionTabs() {
         {canScrollRight && (
           <button
             onClick={() => scrollBy(1)}
-            className="flex items-center px-1 shrink-0 text-text-secondary hover:text-text-primary bg-bg-inset hover:bg-bg-secondary/50 border-l border-border-secondary transition-colors z-10"
+            className="hidden md:flex items-center px-1 shrink-0 text-text-secondary hover:text-text-primary bg-bg-inset hover:bg-bg-secondary/50 border-l border-border-secondary transition-colors z-10"
             title="Scroll tabs right"
           >
             <ChevronRight size={14} />

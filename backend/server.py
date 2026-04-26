@@ -12,6 +12,7 @@ from aiohttp import web
 from config import (HOST, PORT, VERSION, AVAILABLE_MODELS, PERMISSION_MODES, EFFORT_LEVELS,
                      COMMANDER_SYSTEM_PROMPT, TESTER_SYSTEM_PROMPT, TESTER_COMMANDER_SYSTEM_PROMPT,
                      DOCUMENTOR_SYSTEM_PROMPT, DOCUMENTOR_ALLOWED_TOOLS,
+                     PLANNER_SYSTEM_PROMPT, WORKER_SYSTEM_PROMPT_FRAGMENT,
                      MCP_SERVER_PATH, MCP_CONFIG_DIR,
                      GEMINI_MODELS, GEMINI_APPROVAL_MODES, CLI_TYPES)
 from cli_session import UnifiedSession
@@ -44,7 +45,6 @@ ws_peers: dict[str, dict] = {}
 
 # ─── Helpers ──────────────────────────────────────────────────────────────
 
-import glob as _glob
 from pathlib import Path as _Path
 
 
@@ -471,6 +471,11 @@ async def handle_pty_exit(session_id: str, code: int):
         _fire_and_forget(_maybe_auto_distill(session_id, code))
     except Exception:
         logger.debug("Auto-distill skipped for %s", session_id[:8])
+    # Auto-knowledge: extract durable codebase insights into workspace_knowledge
+    try:
+        _fire_and_forget(_maybe_auto_extract_knowledge(session_id, code))
+    except Exception:
+        logger.debug("Auto-knowledge skipped for %s", session_id[:8])
     # Auto-summary: generate short session summary on exit
     try:
         _fire_and_forget(_maybe_auto_summarize(session_id))
@@ -625,6 +630,188 @@ def _detect_distill_type(conversation: str) -> str:
         return "guideline"  # conventions → extract as guideline
     else:
         return "prompt"     # default → extract as reusable prompt template
+
+
+_KNOWLEDGE_EXTRACTION_PROMPT = """You are analyzing a coding session to extract durable knowledge about THIS specific codebase that will help future agents working on it.
+
+<conversation>
+{conversation}
+</conversation>
+
+Extract ONLY high-signal, non-obvious insights about this codebase. Skip generic advice, single-task details, and anything obvious from reading the code.
+
+GOOD examples (extract these):
+- "Database migrations must run via /api/admin/migrate, NOT django-admin migrate — legacy auth wrapper does access checks"
+- "REST APIs use snake_case but WebSocket payloads use camelCase — historical reason, do not normalize"
+- "tools/ session_id is the hook id, not the PTY session id — they are not interchangeable"
+- "All async DB calls must use get_db() then close in finally — pool will leak otherwise"
+
+BAD examples (do NOT extract):
+- "Use async/await for async functions"
+- "The user wanted to add a button"
+- "Tests should pass before merging"
+- "Read the file before editing it"
+
+Categories:
+- architecture — structural decisions and the reason behind them
+- convention — naming, formatting, organization rules specific to this repo
+- gotcha — surprising behavior, footguns, things that look wrong but are correct
+- pattern — recurring code patterns specific to this project
+- api — internal API contracts, request/response shapes, auth flow
+- setup — build, install, dev environment quirks
+
+Return JSON in this exact shape:
+{{
+  "entries": [
+    {{"category": "gotcha", "content": "...", "scope": "backend/auth"}},
+    ...
+  ]
+}}
+
+Rules:
+- Return 0 to 5 entries — be ruthless about quality. {{"entries": []}} is the right answer if nothing meets the bar.
+- "scope" is optional but encouraged — a directory, file, or subsystem name.
+- Each "content" must be 1-3 sentences, specific, and actionable for a future agent.
+- Return ONLY the JSON object. No markdown fences, no commentary."""
+
+
+async def _maybe_auto_extract_knowledge(session_id: str, exit_code: int):
+    """Auto-extract durable codebase insights from a session into workspace_knowledge.
+
+    Gate conditions:
+      - exit_code == 0 (clean exit)
+      - workspace.auto_knowledge_enabled == 1
+      - 5+ conversation turns
+      - session_type is worker or default (skip commander/tester/documentor)
+      - not a worktree/branch session
+    """
+    if exit_code != 0:
+        return
+
+    db = await get_db()
+    try:
+        cur = await db.execute(
+            """SELECT s.*, w.path AS workspace_path, w.auto_knowledge_enabled
+               FROM sessions s
+               LEFT JOIN workspaces w ON s.workspace_id = w.id
+               WHERE s.id = ?""",
+            (session_id,),
+        )
+        sess = await cur.fetchone()
+        if not sess:
+            return
+        sess = dict(sess)
+
+        if not sess.get("auto_knowledge_enabled"):
+            return
+
+        if sess.get("session_type") in ("commander", "tester", "documentor"):
+            return
+
+        if sess.get("worktree"):
+            return
+
+        ws_id = sess.get("workspace_id")
+        if not ws_id:
+            return
+
+        messages = []
+        native_sid = sess.get("native_session_id")
+        workspace_path = sess.get("workspace_path")
+        if native_sid and workspace_path:
+            jsonl_file = _get_project_dir(workspace_path) / f"{native_sid}.jsonl"
+            if jsonl_file.exists():
+                messages = read_session_messages(str(jsonl_file))
+
+        if not messages:
+            cur = await db.execute(
+                "SELECT * FROM messages WHERE session_id = ? ORDER BY created_at",
+                (session_id,),
+            )
+            rows = await cur.fetchall()
+            messages = [dict(r) for r in rows]
+
+        if len(messages) < 5:
+            return
+
+        conversation = _format_conversation_for_distill(messages, max_chars=40_000)
+        if not conversation or len(conversation.strip()) < 200:
+            return
+
+        cli = sess.get("cli_type") or "claude"
+    finally:
+        await db.close()
+
+    prompt = _KNOWLEDGE_EXTRACTION_PROMPT.format(conversation=conversation)
+    try:
+        from llm_router import llm_call_json
+        result = await llm_call_json(cli=cli, model=None, prompt=prompt, timeout=180)
+    except Exception as e:
+        logger.warning("Auto-knowledge extraction LLM call failed for %s: %s", session_id[:8], e)
+        return
+
+    entries = result.get("entries") if isinstance(result, dict) else None
+    if not isinstance(entries, list) or not entries:
+        return
+
+    valid_categories = {"architecture", "convention", "gotcha", "pattern", "api", "setup"}
+    saved_ids: list[str] = []
+    db = await get_db()
+    try:
+        for e in entries[:5]:
+            if not isinstance(e, dict):
+                continue
+            content = (e.get("content") or "").strip()
+            category = (e.get("category") or "").strip().lower()
+            scope = (e.get("scope") or "").strip()
+            if not content or category not in valid_categories:
+                continue
+            entry_id = str(uuid.uuid4())
+            await db.execute(
+                """INSERT INTO workspace_knowledge (id, workspace_id, category, content, scope, contributed_by)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (entry_id, ws_id, category, content, scope, f"auto:{session_id}"),
+            )
+            saved_ids.append(entry_id)
+        if not saved_ids:
+            return
+        await db.commit()
+
+        ph = ",".join("?" * len(saved_ids))
+        cur = await db.execute(
+            f"SELECT * FROM workspace_knowledge WHERE id IN ({ph})", saved_ids,
+        )
+        saved_rows = [dict(r) for r in await cur.fetchall()]
+    finally:
+        await db.close()
+
+    try:
+        from embedder import embed_knowledge
+        for row in saved_rows:
+            try:
+                await embed_knowledge(row)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    try:
+        from event_bus import get_event_bus
+        from commander_events import CommanderEvent
+        bus = get_event_bus()
+        if bus:
+            await bus.emit(
+                CommanderEvent.KNOWLEDGE_CONTRIBUTED, "auto_extract",
+                payload={"session_id": session_id, "count": len(saved_ids), "auto": True},
+                workspace_id=ws_id, session_id=session_id,
+            )
+    except Exception:
+        pass
+
+    logger.info(
+        "Auto-knowledge extracted %d entries from session %s",
+        len(saved_ids), session_id[:8],
+    )
 
 
 async def _maybe_auto_summarize(session_id: str):
@@ -1380,7 +1567,22 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                         continue
 
                     if pty_mgr.is_alive(session_id):
-                        # Already running — just reconnect
+                        # Already running — replay cached output to this viewer
+                        # so a grid cell mounting an existing session sees the
+                        # current TUI state instead of a blank terminal. Send
+                        # only to the requesting ws (broadcasting would dupe
+                        # the buffer to every other client). The xterm-side
+                        # resize effect handles SIGWINCH separately.
+                        cached = pty_mgr.get_cached_output(session_id)
+                        if cached:
+                            try:
+                                await ws.send_json({
+                                    "session_id": session_id,
+                                    "type": "output",
+                                    "data": cached.decode("utf-8", errors="replace"),
+                                })
+                            except (ConnectionResetError, ConnectionError, RuntimeError):
+                                pass
                         continue
 
                     config = await get_session_config(session_id)
@@ -1402,6 +1604,12 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                     system_prompt_parts = []
                     if config.get("system_prompt"):
                         system_prompt_parts.append(config["system_prompt"])
+
+                    _stype = (config.get("session_type") or "").strip()
+                    if _stype == "planner":
+                        system_prompt_parts.append(PLANNER_SYSTEM_PROMPT)
+                    elif _stype in ("", "worker", "test_worker"):
+                        system_prompt_parts.append(WORKER_SYSTEM_PROMPT_FRAGMENT)
 
                     # Track which guideline IDs are ACTUALLY loaded into the
                     # system prompt. Written back to sessions.active_guideline_ids
@@ -1851,6 +2059,19 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
 
                     # ── MCP servers: strategy-driven dispatch ──
                     if mcp_servers_for_session:
+                        # Per-session Playwright MCP arg overrides. The
+                        # tester_headed tag (set via the "Show browser"
+                        # checkbox in the Tester picker) strips --headless so
+                        # the browser is visible. Default is headless.
+                        try:
+                            _session_tags = json.loads(config.get("tags") or "[]")
+                        except (TypeError, ValueError):
+                            _session_tags = []
+                        if "tester_headed" in _session_tags:
+                            for srv in mcp_servers_for_session:
+                                if srv["id"] == "builtin-playwright":
+                                    srv["args"] = [a for a in srv.get("args", []) if a != "--headless"]
+
                         # In frozen (compiled) mode, rewrite builtin MCP servers
                         # to use compiled binaries instead of python3 + script.py
                         from resource_path import is_frozen as _is_frozen
@@ -2471,7 +2692,7 @@ async def update_workspace(request: web.Request) -> web.Response:
                    "knowledge_context_limit", "native_terminals_enabled", "auto_register_terminals",
                    "auto_exec_enabled", "commander_max_workers", "tester_max_workers",
                    "research_max_iterations", "pipeline_enabled",
-                   "task_dependencies_enabled")
+                   "task_dependencies_enabled", "auto_knowledge_enabled")
         fields, values = [], []
         for key in allowed:
             if key in body:
@@ -4364,13 +4585,20 @@ async def update_session_scratchpad(request: web.Request) -> web.Response:
     session_id = request.match_info["id"]
     body = await request.json()
     content = body.get("scratchpad", "")
+    origin = body.get("origin")
     db = await get_db()
     try:
         await db.execute("UPDATE sessions SET scratchpad = ? WHERE id = ?", (content, session_id))
         await db.commit()
-        return web.json_response({"scratchpad": content})
     finally:
         await db.close()
+    await broadcast({
+        "type": "scratchpad_updated",
+        "session_id": session_id,
+        "content": content,
+        "origin": origin,
+    })
+    return web.json_response({"scratchpad": content})
 
 
 # ─── REST: Worker Queue ──────────────────────────────────────────────────
@@ -6752,22 +6980,6 @@ async def create_commander(request: web.Request) -> web.Response:
                ORDER BY created_at DESC LIMIT 1""",
             (workspace_id,),
         )
-        existing = await cur.fetchone()
-        if existing:
-            # Ensure builtin-commander MCP is attached (backfill for older sessions)
-            await db.execute(
-                "INSERT OR IGNORE INTO session_mcp_servers (session_id, mcp_server_id, auto_approve_override) VALUES (?, ?, 1)",
-                (existing["id"], "builtin-commander"),
-            )
-            await db.commit()
-            d = dict(existing)
-            d["status"] = "running" if pty_mgr.is_alive(d["id"]) else "idle"
-            return web.json_response(d)
-
-        # Commander sessions now use the dynamic MCP server system.
-        # The builtin-commander MCP server is attached via session_mcp_servers
-        # instead of writing a raw config file. PTY start handles registration.
-        session_id = str(uuid.uuid4())
         cli_label = get_profile(cli_type).label
         name = f"Commander ({cli_label}) — {dict(ws)['name']}"
 
@@ -6779,6 +6991,35 @@ async def create_commander(request: web.Request) -> web.Response:
             f"\n\nWorkspace Limits: max_workers={max_w}, max_testers={max_t}. "
             "Do not exceed these concurrency limits when creating sessions."
         )
+
+        existing = await cur.fetchone()
+        if existing:
+            # Heal older Commander rows on every click: rewrite name, system
+            # prompt, and auto_approve_mcp, and ensure builtin-commander is
+            # attached. Older rows can have NULL system_prompt or
+            # auto_approve_mcp=0 (created before the orchestrator wiring),
+            # which silently breaks Commander tool routing.
+            await db.execute(
+                """UPDATE sessions
+                   SET name = ?, system_prompt = ?, auto_approve_mcp = 1
+                   WHERE id = ?""",
+                (name, dynamic_prompt, existing["id"]),
+            )
+            await db.execute(
+                "INSERT OR IGNORE INTO session_mcp_servers (session_id, mcp_server_id, auto_approve_override) VALUES (?, ?, 1)",
+                (existing["id"], "builtin-commander"),
+            )
+            await db.commit()
+            cur = await db.execute("SELECT * FROM sessions WHERE id = ?", (existing["id"],))
+            row = await cur.fetchone()
+            d = dict(row)
+            d["status"] = "running" if pty_mgr.is_alive(d["id"]) else "idle"
+            return web.json_response(d)
+
+        # Commander sessions use the dynamic MCP server system.
+        # The builtin-commander MCP server is attached via session_mcp_servers
+        # instead of writing a raw config file. PTY start handles registration.
+        session_id = str(uuid.uuid4())
 
         await db.execute(
             """INSERT INTO sessions (id, workspace_id, name, model, permission_mode, effort,
@@ -6831,6 +7072,7 @@ async def create_tester(request: web.Request) -> web.Response:
     cli_type = body.get("cli_type", "claude")
     default_model = get_profile(cli_type).default_tester_model
     model = body.get("model", default_model)
+    show_browser = bool(body.get("show_browser", False))
 
     db = await get_db()
     try:
@@ -6847,50 +7089,68 @@ async def create_tester(request: web.Request) -> web.Response:
                ORDER BY created_at DESC LIMIT 1""",
             (workspace_id,),
         )
-        existing = await cur.fetchone()
-        if existing:
-            # Ensure Playwright MCP is attached
-            await db.execute(
-                "INSERT OR IGNORE INTO session_mcp_servers (session_id, mcp_server_id, auto_approve_override) VALUES (?, ?, 1)",
-                (existing["id"], "builtin-playwright"),
-            )
-            # Ensure testing agent guideline is attached
-            await db.execute(
-                "INSERT OR IGNORE INTO session_guidelines (session_id, guideline_id) VALUES (?, ?)",
-                (existing["id"], "builtin-testing-agent"),
-            )
-            await db.commit()
-            d = dict(existing)
-            d["status"] = "running" if pty_mgr.is_alive(d["id"]) else "idle"
-            return web.json_response(d)
-
         # Determine tester mode from workspace setting
         tester_mode = dict(ws).get("tester_mode", "direct")
         is_delegated = tester_mode == "delegated"
-
-        # Create new tester session
-        session_id = str(uuid.uuid4())
         cli_label = get_profile(cli_type).label
         mode_label = "Commander" if is_delegated else "Tester"
         name = f"{mode_label} ({cli_label}) — {dict(ws)['name']}"
+        # tester_headed tag: when present, PTY-start strips --headless from the
+        # Playwright MCP args so the user can watch the browser.
+        new_tags = ["tester_headed"] if show_browser else []
 
         if is_delegated:
             # Delegated mode: tester is a test-commander that spawns test-workers
             # Needs commander MCP for session management, and auto permission mode
             system_prompt = TESTER_COMMANDER_SYSTEM_PROMPT
             permission_mode = get_profile(cli_type).default_permission_mode
+            tester_mcp_id = "builtin-commander"
         else:
             # Direct mode: tester runs tests itself with Playwright
             system_prompt = TESTER_SYSTEM_PROMPT
             # Plan mode for Claude (read-only tester); auto for others
             permission_mode = "plan" if get_profile(cli_type).supports(Feature.PLAN_MODE) else get_profile(cli_type).default_permission_mode
+            tester_mcp_id = "builtin-playwright"
+
+        existing = await cur.fetchone()
+        if existing:
+            # Heal: rewrite name + system prompt + auto_approve_mcp on every
+            # click so older Tester rows with NULL/stale fields recover. Also
+            # reconcile the tester_headed tag with the latest checkbox state.
+            existing_tags = json.loads(existing["tags"] or "[]")
+            existing_tags = [t for t in existing_tags if t != "tester_headed"]
+            if show_browser:
+                existing_tags.append("tester_headed")
+            await db.execute(
+                """UPDATE sessions
+                   SET name = ?, system_prompt = ?, auto_approve_mcp = 1, tags = ?
+                   WHERE id = ?""",
+                (name, system_prompt, json.dumps(existing_tags), existing["id"]),
+            )
+            await db.execute(
+                "INSERT OR IGNORE INTO session_mcp_servers (session_id, mcp_server_id, auto_approve_override) VALUES (?, ?, 1)",
+                (existing["id"], tester_mcp_id),
+            )
+            await db.execute(
+                "INSERT OR IGNORE INTO session_guidelines (session_id, guideline_id) VALUES (?, ?)",
+                (existing["id"], "builtin-testing-agent"),
+            )
+            await db.commit()
+            cur = await db.execute("SELECT * FROM sessions WHERE id = ?", (existing["id"],))
+            row = await cur.fetchone()
+            d = dict(row)
+            d["status"] = "running" if pty_mgr.is_alive(d["id"]) else "idle"
+            return web.json_response(d)
+
+        # Create new tester session
+        session_id = str(uuid.uuid4())
 
         await db.execute(
             """INSERT INTO sessions (id, workspace_id, name, model, permission_mode, effort,
-               system_prompt, session_type, auto_approve_mcp, cli_type)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'tester', 1, ?)""",
+               system_prompt, session_type, auto_approve_mcp, cli_type, tags)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'tester', 1, ?, ?)""",
             (session_id, workspace_id, name, model, permission_mode, "high",
-             system_prompt, cli_type),
+             system_prompt, cli_type, json.dumps(new_tags)),
         )
 
         if is_delegated:
@@ -6972,11 +7232,15 @@ async def create_documentor(request: web.Request) -> web.Response:
         )
         existing = await cur.fetchone()
         if existing:
-            # Ensure permission_mode and auto-approve settings are correct
+            # Ensure permission_mode, auto-approve, and system_prompt are correct
             expected_perm = "acceptEdits" if cli_type == "claude" else get_profile(cli_type).default_permission_mode
             await db.execute(
-                "UPDATE sessions SET permission_mode = ?, auto_approve_plan = 1, auto_approve_mcp = 1, allowed_tools = ? WHERE id = ?",
-                (expected_perm, json.dumps(DOCUMENTOR_ALLOWED_TOOLS), existing["id"]),
+                """UPDATE sessions
+                   SET permission_mode = ?, auto_approve_plan = 1, auto_approve_mcp = 1,
+                       allowed_tools = ?, system_prompt = ?
+                   WHERE id = ?""",
+                (expected_perm, json.dumps(DOCUMENTOR_ALLOWED_TOOLS),
+                 DOCUMENTOR_SYSTEM_PROMPT, existing["id"]),
             )
             # Update allow_all_edits tag if changed
             if allow_all_edits:
@@ -7001,7 +7265,9 @@ async def create_documentor(request: web.Request) -> web.Response:
                 (existing["id"], "builtin-documentation-agent"),
             )
             await db.commit()
-            d = dict(existing)
+            cur = await db.execute("SELECT * FROM sessions WHERE id = ?", (existing["id"],))
+            row = await cur.fetchone()
+            d = dict(row)
             d["status"] = "running" if pty_mgr.is_alive(d["id"]) else "idle"
             return web.json_response(d)
 
@@ -7746,7 +8012,12 @@ async def _process_test_queue(workspace_id: str):
             # Build test prompt and send to tester via PTY input
             prompt = _build_test_prompt(entry)
             if pty_mgr.is_alive(tester_id):
-                pty_mgr.write(tester_id, prompt + "\n")
+                msg_bytes = prompt.encode("utf-8")
+                pty_mgr.write(tester_id, b"\x1b" + b"\x7f" * 20)
+                await asyncio.sleep(0.15)
+                pty_mgr.write(tester_id, msg_bytes)
+                await asyncio.sleep(0.4)
+                pty_mgr.write(tester_id, b"\r")  # CR submits in raw-mode CLI TUIs (LF would leave it unsubmitted)
 
             # Broadcast status update
             for ws in ws_clients:
@@ -7802,7 +8073,12 @@ async def _process_test_queue(workspace_id: str):
                 prompt_parts.append("")
 
             prompt_parts.append("Create test-worker sessions and delegate these tests. Report results when all workers complete.")
-            pty_mgr.write(tester_id, "\n".join(prompt_parts) + "\n")
+            batch_bytes = "\n".join(prompt_parts).encode("utf-8")
+            pty_mgr.write(tester_id, b"\x1b" + b"\x7f" * 20)
+            await asyncio.sleep(0.15)
+            pty_mgr.write(tester_id, batch_bytes)
+            await asyncio.sleep(0.4)
+            pty_mgr.write(tester_id, b"\r")
 
             for ws in ws_clients:
                 try:
@@ -10446,6 +10722,11 @@ _RESEARCH_DIR = _PROJECT_ROOT / "research"
 # Track running research jobs: { job_id: { proc, query, started_at, status, output_path } }
 _research_jobs: dict[str, dict] = {}
 
+# Per-job asyncio.Event used to gate the next iteration when the job is in
+# "interactive" (pause-each-round) mode. Set when the user resumes via
+# POST /api/research/jobs/:id/resume.
+_research_pause_events: dict[str, "_asyncio.Event"] = {}
+
 
 def _slugify_query(text: str) -> str:
     """Slugify a query the same way deep_research does, so we can locate
@@ -10791,6 +11072,13 @@ async def _run_research_via_cli(job_id: str, query: str, workspace_id: str | Non
                             + "\n".join(f"  - {q}" for q in steered)
                         )
                         job["steer_queries"] = []  # consumed
+                        await broadcast({
+                            "type": "research_progress", "job_id": job_id,
+                            "line": f"Consuming {len(steered)} steered queries this round",
+                            "entry_id": entry_id,
+                            "phase": "steer", "consumed": True,
+                            "round": iteration + 1,
+                        })
 
                     # Build prompt: initial on first iteration, continuation on subsequent
                     if iteration == 0:
@@ -10920,6 +11208,63 @@ async def _run_research_via_cli(job_id: str, query: str, workspace_id: str | Non
                         await db_check.close()
 
                     done = round_done
+
+                    # Interactive pause — wait for the user to resume before
+                    # the next round. Only when this isn't the last iteration
+                    # and the job hasn't already finished.
+                    if (
+                        job.get("interactive")
+                        and not done
+                        and iteration < max_iterations - 1
+                    ):
+                        # Snapshot what we know to give the user something to react to.
+                        findings_count = 0
+                        try:
+                            db_p = await get_db()
+                            try:
+                                cur_p = await db_p.execute(
+                                    "SELECT findings_summary FROM research_entries WHERE id = ?",
+                                    (entry_id,),
+                                )
+                                row_p = await cur_p.fetchone()
+                                findings_count = len(
+                                    (row_p["findings_summary"] or "").split("\n\n")
+                                ) if row_p else 0
+                            finally:
+                                await db_p.close()
+                        except Exception:
+                            pass
+
+                        await broadcast({
+                            "type": "research_progress", "job_id": job_id,
+                            "line": f"Awaiting your steering before round {iteration + 2}",
+                            "entry_id": entry_id,
+                            "phase": "awaiting",
+                            "round": iteration + 1,
+                            "next_round": iteration + 2,
+                            "total_rounds": max_iterations,
+                            "findings_count": findings_count,
+                            "elapsed": int(_time.time() - job.get("started_at", _time.time())),
+                        })
+
+                        ev = _research_pause_events.get(job_id)
+                        if ev is None:
+                            ev = _asyncio.Event()
+                            _research_pause_events[job_id] = ev
+                        ev.clear()
+                        try:
+                            # Cap the wait at 30 minutes so a forgotten browser
+                            # tab can't hold the job forever.
+                            await _asyncio.wait_for(ev.wait(), timeout=1800)
+                        except _asyncio.TimeoutError:
+                            await broadcast({
+                                "type": "research_progress", "job_id": job_id,
+                                "line": "Awaiting timed out — resuming automatically",
+                                "entry_id": entry_id,
+                                "phase": "awaiting", "auto_resumed": True,
+                            })
+                        finally:
+                            _research_pause_events.pop(job_id, None)
 
                 # 5. Stop the PTY
                 try:
@@ -11178,8 +11523,12 @@ async def start_research(request: web.Request) -> web.Response:
     dig_deeper = body.get("dig_deeper", False)  # continuing from previous findings
     mcp_server_ids = body.get("mcp_server_ids", [])  # MCP servers as data sources
     plan = body.get("plan")  # Pre-built research plan (from collaborative planning)
+    interactive = bool(body.get("interactive", False))  # pause for steering each round
     # If MCP servers are requested and backend is auto, prefer CLI path
     if mcp_server_ids and not backend:
+        backend = "cli"
+    # Interactive (pause-each-round) only meaningfully supported in CLI-brain mode
+    if interactive:
         backend = "cli"
     _research_jobs[job_id] = {
         "query": query, "model": model, "status": "pending",
@@ -11187,6 +11536,7 @@ async def start_research(request: web.Request) -> web.Response:
         "depth": depth, "recency_months": recency_months,
         "cross_temporal": cross_temporal, "dig_deeper": dig_deeper,
         "mcp_server_ids": mcp_server_ids, "plan": plan,
+        "interactive": interactive,
         "steer_queries": [],  # for mid-research injection
     }
     _asyncio.ensure_future(_run_research_job(
@@ -11262,18 +11612,85 @@ async def steer_research_job(request: web.Request) -> web.Response:
     if not queries:
         return web.json_response({"error": "queries array required"}, status=400)
 
-    # Append to steer list (consumed by next iteration)
+    # Append to steer list (consumed by next iteration in CLI-brain mode)
     existing = job.get("steer_queries") or []
     existing.extend(queries)
     job["steer_queries"] = existing
 
+    # Also write to <_RESEARCH_DIR>/steer-<entry_id>.md so the standalone subprocess
+    # path picks them up on its next iteration via researcher.py's file poll.
+    try:
+        eid = job.get("entry_id")
+        if eid:
+            steer_path = _RESEARCH_DIR / f"steer-{eid}.md"
+            steer_path.parent.mkdir(parents=True, exist_ok=True)
+            existing_text = steer_path.read_text() if steer_path.exists() else ""
+            with steer_path.open("a") as f:
+                if existing_text and not existing_text.endswith("\n"):
+                    f.write("\n")
+                for q in queries:
+                    f.write(q.strip() + "\n")
+    except Exception as e:
+        logger.warning("failed to write steer file: %s", e)
+
     await broadcast({
         "type": "research_progress", "job_id": job_id,
-        "line": f"Steered: +{len(queries)} sub-queries injected",
+        "line": f"Steered: +{len(queries)} sub-queries queued",
         "entry_id": job.get("entry_id"),
+        "phase": "steer", "queued": True,
     })
+    for q in queries:
+        await broadcast({
+            "type": "research_progress", "job_id": job_id,
+            "line": f"  ↳ {q}",
+            "entry_id": job.get("entry_id"),
+            "phase": "steer", "queued": True,
+        })
 
     return web.json_response({"ok": True, "queued": len(existing)})
+
+
+async def resume_research_job(request: web.Request) -> web.Response:
+    """POST /api/research/jobs/{job_id}/resume — release a paused interactive job.
+
+    Body: { queries?: [...], skip?: bool }
+      - queries: optional steer queries to inject before the next round
+      - skip: if true, do not inject queries even if present in body
+
+    Only meaningful for jobs started with interactive=true (CLI-brain mode).
+    """
+    job_id = request.match_info["job_id"]
+    job = _research_jobs.get(job_id)
+    if not job:
+        return web.json_response({"error": "job not found"}, status=404)
+
+    body = await request.json() if request.can_read_body else {}
+    queries = [] if body.get("skip") else (body.get("queries") or [])
+    queries = [q.strip() for q in queries if isinstance(q, str) and q.strip()]
+
+    if queries:
+        existing = job.get("steer_queries") or []
+        existing.extend(queries)
+        job["steer_queries"] = existing
+        await broadcast({
+            "type": "research_progress", "job_id": job_id,
+            "line": f"Resumed with {len(queries)} steered queries",
+            "entry_id": job.get("entry_id"),
+            "phase": "steer", "queued": True,
+        })
+    else:
+        await broadcast({
+            "type": "research_progress", "job_id": job_id,
+            "line": "Resumed (no steers)",
+            "entry_id": job.get("entry_id"),
+            "phase": "steer", "queued": True,
+        })
+
+    ev = _research_pause_events.get(job_id)
+    if ev and not ev.is_set():
+        ev.set()
+        return web.json_response({"ok": True, "resumed": True, "queued": len(queries)})
+    return web.json_response({"ok": True, "resumed": False, "queued": len(queries)})
 
 
 async def list_research_jobs(request: web.Request) -> web.Response:
@@ -11289,6 +11706,7 @@ async def list_research_jobs(request: web.Request) -> web.Response:
             "entry_id": j.get("entry_id"),
             "error": j.get("error"),
             "backend": j.get("backend"),
+            "interactive": bool(j.get("interactive")),
         })
     return web.json_response(jobs)
 
@@ -11306,6 +11724,10 @@ async def stop_research_job(request: web.Request) -> web.Response:
             await _asyncio.wait_for(proc.wait(), timeout=5)
         except _asyncio.TimeoutError:
             proc.kill()
+    # Release a paused interactive job so its loop can exit cleanly.
+    ev = _research_pause_events.pop(job_id, None)
+    if ev and not ev.is_set():
+        ev.set()
     job["status"] = "stopped"
     return web.json_response({"ok": True})
 
@@ -11686,8 +12108,14 @@ async def cors_middleware(request: web.Request, handler):
 # Localhost hook endpoints (/api/hooks/*) are exempt (verified local).
 
 AUTH_TOKEN: str | None = None  # Set by --multiplayer / --token flag
+_TUNNEL_MODE: bool = False  # Set by --tunnel flag — disables blanket localhost trust
+_MULTIPLAYER_MODE: bool = False  # Set by --multiplayer flag — enables preview proxy etc.
 
 _LOCALHOST_ADDRS = {"127.0.0.1", "::1", "localhost"}
+# Cloudflare-tunnel proxied requests arrive from 127.0.0.1 (cloudflared) but
+# carry these headers. Used to distinguish real local traffic from tunnel
+# traffic that should be auth-checked.
+_CLOUDFLARE_FORWARD_HEADERS = ("Cf-Connecting-Ip", "Cf-Ray", "Cf-Connecting-IPv6")
 
 # ── Rate limiting for auth failures ──────────────────────────────────────
 import time as _auth_time
@@ -11799,13 +12227,19 @@ async def token_auth_middleware(request: web.Request, handler):
     if not AUTH_TOKEN:
         return await handler(request)
 
-    # Localhost is always trusted — MCP servers, hooks, CLI tools, and the
-    # local browser all connect from 127.0.0.1.  Auth only gates remote
-    # access (tunnel / multiplayer over the internet).
+    # Localhost is trusted for MCP servers, hooks, CLI tools, and the local
+    # browser. BUT in tunnel mode, cloudflared connects from 127.0.0.1 too,
+    # so a blanket localhost exemption would let every external tunnel
+    # request bypass auth. In tunnel mode, only treat a request as truly
+    # local if it has no Cloudflare forwarding headers.
     peername = request.transport.get_extra_info("peername")
     remote_ip = peername[0] if peername else "unknown"
     if remote_ip in _LOCALHOST_ADDRS:
-        return await handler(request)
+        if _TUNNEL_MODE and any(request.headers.get(h) for h in _CLOUDFLARE_FORWARD_HEADERS):
+            # Tunnel-proxied request — fall through to token check
+            pass
+        else:
+            return await handler(request)
 
     # Auth login form endpoint — exempt (has its own rate limiting)
     if request.path == "/auth" and request.method == "POST":
@@ -11833,7 +12267,7 @@ async def token_auth_middleware(request: web.Request, handler):
         return web.json_response({"error": "Unauthorized"}, status=401)
 
     # ?token= in URL → set cookie and redirect to clean URL (convenience)
-    if request.query.get("token") and request.method == "GET" and not request.path.startswith(("/api/", "/ws")):
+    if request.query.get("token") and request.method == "GET" and not request.path.startswith(("/api/", "/ws", "/preview/")):
         clean_query = {k: v for k, v in request.query.items() if k != "token"}
         clean_url = str(request.url.with_query(clean_query))
         resp = web.HTTPFound(clean_url)
@@ -11843,7 +12277,211 @@ async def token_auth_middleware(request: web.Request, handler):
     return await handler(request)
 
 
+# ─── Cloudflare-tunnel-aware preview proxy ──────────────────────────────
+# Forwards `GET /preview/<port>/<path>` to `http://127.0.0.1:<port>/<path>` so
+# tunnel/multiplayer collaborators can view localhost dev servers running on
+# the host. HTML responses get a `<base href>` injected so root-relative
+# assets resolve under the `/preview/<port>/` prefix.
+
+_PREVIEW_PROXY_DENY_PORTS = {
+    5111,   # backend itself
+    5173,   # Vite dev server (frontend)
+    22,     # ssh
+    3306,   # MySQL
+    5432,   # PostgreSQL
+    6379,   # Redis
+    27017,  # MongoDB
+}
+_PREVIEW_PROXY_TIMEOUT = 30  # seconds, applied per upstream request
+# Headers that should not be relayed upstream — hop-by-hop and tunnel artifacts.
+_PREVIEW_PROXY_STRIP_REQ_HEADERS = {
+    "host", "connection", "keep-alive", "proxy-authenticate",
+    "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade",
+}
+# Response headers we drop because aiohttp's StreamResponse manages framing.
+_PREVIEW_PROXY_STRIP_RESP_HEADERS = {
+    "content-length", "content-encoding", "transfer-encoding", "connection",
+    "keep-alive",
+}
+
+
+def _preview_port_allowed(port: int) -> bool:
+    if port < 1024 or port > 65535:
+        return False
+    if port in _PREVIEW_PROXY_DENY_PORTS:
+        return False
+    return True
+
+
+async def proxy_localhost(request: web.Request) -> web.StreamResponse:
+    """Reverse-proxy a request to `127.0.0.1:<port>/<path>`.
+
+    Streams the upstream response back so SSE / large assets work. For
+    `text/html` responses a `<base href="/preview/<port>/">` tag is injected
+    so root-relative URLs resolve back through the proxy.
+    """
+    port_str = request.match_info.get("port", "")
+    try:
+        port = int(port_str)
+    except ValueError:
+        return web.json_response({"error": "invalid port"}, status=400)
+    if not _preview_port_allowed(port):
+        return web.json_response(
+            {"error": f"port {port} is not allowed by the preview proxy"},
+            status=403,
+        )
+
+    path = request.match_info.get("path", "")
+    upstream_path = "/" + path if path else "/"
+
+    # Build upstream URL — explicitly hard-pinned to 127.0.0.1, never an
+    # arbitrary host. Preserve query string verbatim.
+    upstream_url = f"http://127.0.0.1:{port}{upstream_path}"
+    if request.query_string:
+        upstream_url = f"{upstream_url}?{request.query_string}"
+
+    # WebSocket upgrade → return 501 for now. Bidirectional WS pumping is
+    # tracked as a TODO; the HTML/HTTP path is the priority and most dev
+    # servers (Vite, Next.js) gracefully degrade without the WS channel.
+    if request.headers.get("Upgrade", "").lower() == "websocket":
+        return web.json_response(
+            {"error": "websocket proxying not yet implemented"},
+            status=501,
+        )
+
+    # Build upstream headers: drop hop-by-hop, Cloudflare tunnel artifacts,
+    # and pin Host to the loopback target so virtual-hosted upstreams see
+    # the right name.
+    upstream_headers: dict[str, str] = {}
+    for name, value in request.headers.items():
+        lname = name.lower()
+        if lname in _PREVIEW_PROXY_STRIP_REQ_HEADERS:
+            continue
+        if lname.startswith("cf-"):
+            continue
+        upstream_headers[name] = value
+    upstream_headers["Host"] = f"127.0.0.1:{port}"
+
+    session: aiohttp.ClientSession = request.app.get("preview_proxy_session")
+    if session is None:
+        return web.json_response(
+            {"error": "preview proxy session not initialized"},
+            status=500,
+        )
+
+    # Stream the request body so large uploads don't buffer in memory.
+    has_body = request.method not in {"GET", "HEAD", "OPTIONS"}
+    body = request.content if has_body else None
+    timeout = aiohttp.ClientTimeout(total=_PREVIEW_PROXY_TIMEOUT)
+
+    try:
+        upstream = await session.request(
+            request.method,
+            upstream_url,
+            headers=upstream_headers,
+            data=body,
+            allow_redirects=False,
+            timeout=timeout,
+        )
+    except (aiohttp.ClientConnectorError, aiohttp.ServerDisconnectedError,
+            aiohttp.ClientOSError, asyncio.TimeoutError) as e:
+        return web.json_response(
+            {"error": "upstream connection failed",
+             "detail": str(e), "port": port},
+            status=502,
+        )
+    except aiohttp.ClientError as e:
+        return web.json_response(
+            {"error": "upstream request failed",
+             "detail": str(e), "port": port},
+            status=502,
+        )
+
+    try:
+        content_type = (upstream.headers.get("Content-Type") or "").lower()
+        is_html = content_type.startswith("text/html")
+
+        # ── Text/HTML branch — buffer + rewrite ──────────────────────
+        # We need the full body to inject <base href> reliably, so for HTML
+        # we read it eagerly. Streaming would be possible but the rewrite
+        # is fragile if <head> spans chunk boundaries.
+        if is_html:
+            try:
+                raw = await upstream.read()
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                return web.json_response(
+                    {"error": "upstream read failed",
+                     "detail": str(e), "port": port},
+                    status=502,
+                )
+
+            base_tag = f'<base href="/preview/{port}/">'.encode()
+            # Inject right after opening <head> tag (case-insensitive). Fall
+            # back to "before the first '<' in body" if no <head> found —
+            # tolerates fragments and stripped-down html.
+            head_match = _re.search(rb"<head[^>]*>", raw, _re.IGNORECASE)
+            if head_match:
+                idx = head_match.end()
+                rewritten = raw[:idx] + base_tag + raw[idx:]
+            else:
+                first_lt = raw.find(b"<")
+                if first_lt >= 0:
+                    rewritten = raw[:first_lt] + base_tag + raw[first_lt:]
+                else:
+                    rewritten = base_tag + raw
+
+            resp = web.StreamResponse(status=upstream.status)
+            for name, value in upstream.headers.items():
+                if name.lower() in _PREVIEW_PROXY_STRIP_RESP_HEADERS:
+                    continue
+                resp.headers[name] = value
+            resp.content_length = len(rewritten)
+            await resp.prepare(request)
+            await resp.write(rewritten)
+            await resp.write_eof()
+            return resp
+
+        # ── Streaming pass-through for everything else ───────────────
+        resp = web.StreamResponse(status=upstream.status)
+        for name, value in upstream.headers.items():
+            if name.lower() in _PREVIEW_PROXY_STRIP_RESP_HEADERS:
+                continue
+            resp.headers[name] = value
+        # SSE / chunked: don't set Content-Length, let aiohttp chunk-encode.
+        await resp.prepare(request)
+        try:
+            async for chunk in upstream.content.iter_any():
+                if not chunk:
+                    continue
+                await resp.write(chunk)
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            logger.debug("preview proxy stream interrupted (port %s): %s", port, e)
+        await resp.write_eof()
+        return resp
+    finally:
+        upstream.release()
+
+
+async def proxy_localhost_disabled(request: web.Request) -> web.Response:
+    """Stub used in single-player local mode — preview proxy is unnecessary
+    because collaborators always reach localhost directly."""
+    return web.json_response(
+        {"error": "preview proxy is only available in --tunnel or "
+                  "--multiplayer mode"},
+        status=404,
+    )
+
+
 async def on_startup(app: web.Application):
+    # Shared aiohttp session for the preview proxy. Only created when the
+    # proxy is actually mounted, but we always assign to keep handler code
+    # simple.
+    if _TUNNEL_MODE or _MULTIPLAYER_MODE:
+        app["preview_proxy_session"] = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=_PREVIEW_PROXY_TIMEOUT),
+            auto_decompress=False,  # passthrough compressed bytes
+        )
+
     await init_db()
     pty_mgr.on_output(handle_pty_output)
     pty_mgr.on_output(capture_proc.process)
@@ -11904,6 +12542,9 @@ async def on_startup(app: web.Application):
     await pipeline_engine.ensure_presets()
     await pipeline_engine.recover_active_runs()
 
+    # ── Demo runner: per-workspace stable preview build ─────────────
+    _demo_runner.set_broadcast_fn(broadcast)
+
     # ── Research scheduler (cron-like recurring research) ───────────
     global _research_scheduler_task
     _research_scheduler_task = _asyncio.ensure_future(_research_scheduler_loop())
@@ -11912,6 +12553,17 @@ async def on_startup(app: web.Application):
     # ── Telemetry (anonymous startup + daily heartbeat) ─────────────
     import telemetry
     telemetry.start_background()
+
+    # ── Session supervisor: PTY health monitor + auto-restart ───────
+    import session_supervisor
+    session_supervisor.set_pty_manager(pty_mgr)
+    await session_supervisor.start(app)
+    app.on_cleanup.append(session_supervisor.stop)
+
+    # ── Autolearn: passive insight extraction (gated by feature flag)
+    import auto_learn
+    await auto_learn.start(app)
+    app.on_cleanup.append(auto_learn.stop)
 
     async def store_and_broadcast_capture(session_id: str, capture: dict):
         """Store capture in DB and broadcast via WebSocket."""
@@ -12015,6 +12667,16 @@ async def on_cleanup(app: web.Application):
         await preview_browser.shutdown()
     except Exception:
         pass
+    try:
+        await _demo_runner.shutdown_all()
+    except Exception:
+        pass
+    proxy_session = app.get("preview_proxy_session")
+    if proxy_session is not None:
+        try:
+            await proxy_session.close()
+        except Exception:
+            pass
     for ws in list(ws_clients):
         await ws.close()
 
@@ -12885,16 +13547,24 @@ async def create_peer_message(request: web.Request) -> web.Response:
         return web.json_response({"error": "content required"}, status=400)
 
     msg_id = str(uuid.uuid4())
+    blocking = 1 if body.get("blocking") else 0
+    in_reply_to = body.get("in_reply_to") or None
     db = await get_db()
     try:
         await db.execute(
-            """INSERT INTO peer_messages (id, workspace_id, from_session_id, topic, content, priority, files)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO peer_messages (id, workspace_id, from_session_id, topic, content, priority, files, blocking, in_reply_to)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (msg_id, ws_id, body.get("from_session_id", ""),
              body.get("topic", "general"), content,
              body.get("priority", "info"),
-             body.get("files", "[]") if isinstance(body.get("files"), str) else json.dumps(body.get("files", []))),
+             body.get("files", "[]") if isinstance(body.get("files"), str) else json.dumps(body.get("files", [])),
+             blocking, in_reply_to),
         )
+        if in_reply_to:
+            await db.execute(
+                "UPDATE peer_messages SET reply_received = 1 WHERE id = ?",
+                (in_reply_to,),
+            )
         await db.commit()
         cur = await db.execute("SELECT * FROM peer_messages WHERE id = ?", (msg_id,))
         row = await cur.fetchone()
@@ -13334,6 +14004,168 @@ async def list_recent_file_activity(request: web.Request) -> web.Response:
         await db.close()
 
 
+# ─── Session supervisor: health + restart ──────────────────────────
+
+async def get_session_health(request: web.Request) -> web.Response:
+    import session_supervisor
+    sid = request.match_info["id"]
+    health = await session_supervisor.get_health(sid)
+    if health is None:
+        return web.json_response({"error": "session not found"}, status=404)
+    return web.json_response(health)
+
+
+async def list_session_health(request: web.Request) -> web.Response:
+    import session_supervisor
+    return web.json_response(await session_supervisor.list_health())
+
+
+async def restart_session(request: web.Request) -> web.Response:
+    import session_supervisor
+    sid = request.match_info["id"]
+    try:
+        result = await session_supervisor.restart(sid)
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=500)
+    return web.json_response(result)
+
+
+# ─── Autolearn: pending suggestions + approve/reject ───────────────
+
+async def list_autolearn_pending(request: web.Request) -> web.Response:
+    import auto_learn
+    return web.json_response(await auto_learn.list_pending())
+
+
+async def approve_autolearn(request: web.Request) -> web.Response:
+    sid = request.match_info["id"]
+    import auto_learn
+    try:
+        result = await auto_learn.approve(sid)
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=400)
+    return web.json_response(result)
+
+
+async def reject_autolearn(request: web.Request) -> web.Response:
+    sid = request.match_info["id"]
+    import auto_learn
+    try:
+        await auto_learn.reject(sid)
+    except Exception as e:
+        return web.json_response({"error": str(e)}, status=400)
+    return web.json_response({"ok": True})
+
+
+# ─── REST: Demo runner ─────────────────────────────────────────────────
+# Per-workspace long-lived dev server for testers/reviewers. Workers can
+# hack freely without restarting it; operators promote new builds via the
+# explicit pull-latest action. See backend/demo_runner.py.
+
+import demo_runner as _demo_runner
+
+
+async def _demo_load_workspace(request: web.Request) -> tuple[str, str] | tuple[None, web.Response]:
+    ws_id = request.match_info["id"]
+    ws_path = await _get_workspace_path(ws_id)
+    if not ws_path:
+        return None, web.json_response({"error": "workspace not found"}, status=404)
+    return ws_id, ws_path
+
+
+async def _demo_workspace_settings(workspace_id: str) -> dict:
+    """Pull demo_* settings off the workspaces row (best-effort)."""
+    db = await get_db()
+    try:
+        cur = await db.execute(
+            "SELECT demo_command, demo_branch, demo_port FROM workspaces WHERE id = ?",
+            (workspace_id,),
+        )
+        row = await cur.fetchone()
+        if not row:
+            return {}
+        return {
+            "command": row["demo_command"] or "npm run dev",
+            "branch": row["demo_branch"] or "main",
+            "port": int(row["demo_port"] or 0),
+        }
+    except Exception:
+        return {}
+    finally:
+        await db.close()
+
+
+async def get_demo(request: web.Request) -> web.Response:
+    loaded = await _demo_load_workspace(request)
+    if loaded[0] is None:
+        return loaded[1]
+    ws_id, _ws_path = loaded
+    info = await _demo_runner.status(ws_id)
+    if info is None:
+        defaults = await _demo_workspace_settings(ws_id)
+        return web.json_response({"workspace_id": ws_id, "status": "stopped", **defaults})
+    return web.json_response(info)
+
+
+async def start_demo(request: web.Request) -> web.Response:
+    loaded = await _demo_load_workspace(request)
+    if loaded[0] is None:
+        return loaded[1]
+    ws_id, ws_path = loaded
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    defaults = await _demo_workspace_settings(ws_id)
+    branch = body.get("branch") or defaults.get("branch") or "main"
+    command = body.get("command") or defaults.get("command") or "npm run dev"
+    port = body.get("port") or defaults.get("port") or None
+    if port == 0:
+        port = None
+    info = await _demo_runner.start(
+        workspace_id=ws_id,
+        workspace_path=ws_path,
+        branch=branch,
+        command=command,
+        port=port,
+    )
+    return web.json_response(info)
+
+
+async def stop_demo(request: web.Request) -> web.Response:
+    loaded = await _demo_load_workspace(request)
+    if loaded[0] is None:
+        return loaded[1]
+    ws_id, _ws_path = loaded
+    info = await _demo_runner.stop(ws_id)
+    return web.json_response(info)
+
+
+async def pull_latest_demo(request: web.Request) -> web.Response:
+    loaded = await _demo_load_workspace(request)
+    if loaded[0] is None:
+        return loaded[1]
+    ws_id, _ws_path = loaded
+    info = await _demo_runner.pull_latest(ws_id)
+    return web.json_response(info)
+
+
+async def list_demos(request: web.Request) -> web.Response:
+    return web.json_response(await _demo_runner.list_all())
+
+
+async def get_demo_log(request: web.Request) -> web.Response:
+    loaded = await _demo_load_workspace(request)
+    if loaded[0] is None:
+        return loaded[1]
+    ws_id, _ws_path = loaded
+    info = await _demo_runner.status(ws_id)
+    if info is None:
+        return web.json_response({"workspace_id": ws_id, "lines": []})
+    return web.json_response({"workspace_id": ws_id, "lines": info.get("build_log_tail", [])})
+
+
 def create_app() -> web.Application:
     middlewares = [cors_middleware]
     if AUTH_TOKEN:
@@ -13454,6 +14286,7 @@ def create_app() -> web.Application:
     app.router.add_post("/api/research/jobs", start_research)
     app.router.add_get("/api/research/jobs", list_research_jobs)
     app.router.add_post("/api/research/jobs/{job_id}/steer", steer_research_job)
+    app.router.add_post("/api/research/jobs/{job_id}/resume", resume_research_job)
     app.router.add_delete("/api/research/jobs/{job_id}", stop_research_job)
     app.router.add_get("/api/research/schedules", list_research_schedules)
     app.router.add_post("/api/research/schedules", create_research_schedule)
@@ -13527,6 +14360,14 @@ def create_app() -> web.Application:
     app.router.add_get("/api/workspaces/{id}/git/diff", get_workspace_git_diff)
     app.router.add_get("/api/workspaces/{id}/git/log", get_workspace_git_log)
     app.router.add_post("/api/open-in-ide", open_in_ide)
+
+    # Demo runner — per-workspace stable dev-server preview
+    app.router.add_get("/api/workspaces/{id}/demo", get_demo)
+    app.router.add_post("/api/workspaces/{id}/demo/start", start_demo)
+    app.router.add_post("/api/workspaces/{id}/demo/stop", stop_demo)
+    app.router.add_post("/api/workspaces/{id}/demo/pull-latest", pull_latest_demo)
+    app.router.add_get("/api/workspaces/{id}/demo/log", get_demo_log)
+    app.router.add_get("/api/demos", list_demos)
 
     # Session tree + subagents
     app.router.add_get("/api/sessions/{id}/tree", get_session_tree)
@@ -13696,11 +14537,50 @@ def create_app() -> web.Application:
     # W2W: Export knowledge to native config files
     app.router.add_post("/api/workspaces/{id}/knowledge/export", export_knowledge_to_config)
 
+    # Session supervisor: PTY health + restart
+    app.router.add_get("/api/sessions/health", list_session_health)
+    app.router.add_get("/api/sessions/{id}/health", get_session_health)
+    app.router.add_post("/api/sessions/{id}/restart", restart_session)
+
+    # Autolearn: pending suggestions + approve/reject
+    app.router.add_get("/api/memory/autolearn/pending", list_autolearn_pending)
+    app.router.add_post("/api/memory/autolearn/{id}/approve", approve_autolearn)
+    app.router.add_delete("/api/memory/autolearn/{id}", reject_autolearn)
+
     # CLI lifecycle hooks (replaces ANSI-based state detection)
     from hooks import handle_hook_event
     app.router.add_post("/api/hooks/event", handle_hook_event)
     app.router.add_post("/api/hooks/discover", handle_hook_discover)
     app.router.add_post("/api/hooks/pipeline-result", handle_pipeline_result)
+
+    # ── Cloudflare-tunnel-aware preview proxy ─────────────────────
+    # Only mounted when running with --tunnel or --multiplayer; in
+    # single-player local mode collaborators always reach localhost
+    # dev servers directly so the proxy is unnecessary (and we register
+    # a no-op 404 to make that explicit).
+    if _TUNNEL_MODE or _MULTIPLAYER_MODE:
+        for method in ("GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"):
+            app.router.add_route(
+                method,
+                r"/preview/{port:\d{2,5}}",
+                proxy_localhost,
+            )
+            app.router.add_route(
+                method,
+                r"/preview/{port:\d{2,5}}/{path:.*}",
+                proxy_localhost,
+            )
+    else:
+        app.router.add_route(
+            "*",
+            r"/preview/{port:\d{2,5}}",
+            proxy_localhost_disabled,
+        )
+        app.router.add_route(
+            "*",
+            r"/preview/{port:\d{2,5}}/{path:.*}",
+            proxy_localhost_disabled,
+        )
 
     # ── Static frontend serving (production mode) ──────────────────
     # When a built frontend exists, serve it directly from the backend.
@@ -13910,6 +14790,13 @@ if __name__ == "__main__":
         AUTH_TOKEN = args.token or _generate_token()
     elif args.token:
         AUTH_TOKEN = args.token
+
+    # Tunnel mode disables blanket 127.0.0.1 trust in the auth middleware,
+    # since cloudflared proxies external traffic from the loopback address.
+    if args.tunnel:
+        _TUNNEL_MODE = True
+    if args.multiplayer:
+        _MULTIPLAYER_MODE = True
 
     # mDNS registration for LAN discovery
     mdns_proc = None

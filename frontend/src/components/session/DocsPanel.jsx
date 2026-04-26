@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { X, BookOpenCheck, Camera, Film, FileText, Hammer, Eye, RefreshCw, AlertCircle, CheckCircle2, FolderTree, ExternalLink, Play, RotateCcw, Send } from 'lucide-react'
+import { X, BookOpenCheck, Camera, Film, FileText, Hammer, Eye, RefreshCw, AlertCircle, CheckCircle2, FolderTree, Play, RotateCcw } from 'lucide-react'
 import { api } from '../../lib/api'
 import { sendTerminalCommand } from '../../lib/terminal'
 import useStore from '../../state/store'

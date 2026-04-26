@@ -46,6 +46,14 @@ import tempfile
 import time
 from pathlib import Path
 
+# Self-bootstrap sys.path so `from myelin import ...` resolves even when this
+# script is invoked by absolute path (without PYTHONPATH). hook.py lives at
+# ext-repo/myelin/coordination/hook.py — its grandparent is ext-repo/, which
+# contains the `myelin/` package.
+_EXT_REPO = Path(__file__).resolve().parent.parent.parent
+if str(_EXT_REPO) not in sys.path:
+    sys.path.insert(0, str(_EXT_REPO))
+
 
 # Sidecar dir for passing user prompts between hooks.
 # Lives under the current user's private temp dir (0700 created below).

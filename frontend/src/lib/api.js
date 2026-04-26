@@ -136,10 +136,10 @@ export const api = {
 
   // Session scratchpad
   getSessionScratchpad: (sessionId) => request(`/sessions/${sessionId}/scratchpad`),
-  updateSessionScratchpad: (sessionId, scratchpad) =>
+  updateSessionScratchpad: (sessionId, scratchpad, origin) =>
     request(`/sessions/${sessionId}/scratchpad`, {
       method: 'PUT',
-      body: JSON.stringify({ scratchpad }),
+      body: JSON.stringify({ scratchpad, origin }),
     }),
 
   // Session guidelines
@@ -239,6 +239,7 @@ export const api = {
   startResearch: (data) => request('/research/jobs', { method: 'POST', body: JSON.stringify(data) }),
   listResearchJobs: () => request('/research/jobs'),
   steerResearchJob: (jobId, queries) => request(`/research/jobs/${jobId}/steer`, { method: 'POST', body: JSON.stringify({ queries }) }),
+  resumeResearchJob: (jobId, body = {}) => request(`/research/jobs/${jobId}/resume`, { method: 'POST', body: JSON.stringify(body) }),
   stopResearchJob: (jobId) => request(`/research/jobs/${jobId}`, { method: 'DELETE' }),
 
   // Research schedules (recurring/cron)
@@ -633,4 +634,58 @@ export const api = {
     request('/api-keys', { method: 'PUT', body: JSON.stringify({ name, value }) }),
   testApiKey: (name) =>
     request('/api-keys/test', { method: 'POST', body: JSON.stringify({ name }) }),
+}
+
+// ── Cloudflare-tunnel-aware preview URL helper ────────────────────
+// When IVE is being served from a non-loopback origin (typically a
+// `*.trycloudflare.com` quick tunnel or an exposed multiplayer host),
+// `http://localhost:PORT/...` URLs do NOT resolve on the visitor's
+// machine — they'd hit the visitor's own laptop. The backend exposes
+// a `/preview/<port>/...` reverse-proxy in those modes; this helper
+// returns the right URL based on origin so callers don't have to think
+// about it.
+//
+//   localhost browser  → returns `http://127.0.0.1:<port><path>`
+//   tunnel browser     → returns `<origin>/preview/<port><path>`
+export function isLocalOrigin() {
+  if (typeof window === 'undefined') return true
+  const h = window.location.hostname
+  return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === ''
+}
+
+export function localPreviewUrl(port, path = '/') {
+  const p = path.startsWith('/') ? path : `/${path}`
+  if (isLocalOrigin()) {
+    return `http://127.0.0.1:${port}${p}`
+  }
+  // Strip the leading slash from the path because the proxy mount itself
+  // ends in `/preview/<port>/`, then re-add the path under it.
+  return `${window.location.origin}/preview/${port}${p}`
+}
+
+// Rewrite a `http://localhost:PORT/...` or `http://127.0.0.1:PORT/...`
+// URL so it routes through the preview proxy when we're served from a
+// non-local origin. Anything else is returned unchanged.
+export function rewriteLocalPreviewUrl(url) {
+  if (!url || isLocalOrigin()) return url
+  const m = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):(\d+)(\/.*)?$/i.exec(url)
+  if (!m) return url
+  const port = parseInt(m[1], 10)
+  const path = m[2] || '/'
+  return localPreviewUrl(port, path)
+}
+
+// ─── Demo runner ─────────────────────────────────────────────────
+// Per-workspace stable dev-server preview. Workers can churn freely
+// without restarting this; operators promote new builds via pullLatest.
+export const demoApi = {
+  status: (wsId) => request(`/workspaces/${wsId}/demo`),
+  start: (wsId, body = {}) =>
+    request(`/workspaces/${wsId}/demo/start`, { method: 'POST', body: JSON.stringify(body) }),
+  stop: (wsId) =>
+    request(`/workspaces/${wsId}/demo/stop`, { method: 'POST' }),
+  pullLatest: (wsId) =>
+    request(`/workspaces/${wsId}/demo/pull-latest`, { method: 'POST' }),
+  log: (wsId) => request(`/workspaces/${wsId}/demo/log`),
+  list: () => request('/demos'),
 }

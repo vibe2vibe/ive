@@ -3,12 +3,12 @@ import {
   GitCompareArrows, X, RefreshCw, Send, ChevronRight, ChevronDown,
   FileEdit, FilePlus, FileMinus, FileQuestion, Files, Loader2, AlertTriangle,
   GitCommitVertical, Check, ExternalLink, Settings2, Search, FolderOpen,
-  MessageSquareQuote, Edit3, Save, RotateCcw
+  Edit3, Save, RotateCcw
 } from 'lucide-react'
 import useStore from '../../state/store'
 import { api } from '../../lib/api'
 import { typeInTerminal } from '../../lib/terminal'
-import { parseDiffLines, splitDiffByFile } from '../../lib/diffParser'
+import { parseDiffLines } from '../../lib/diffParser'
 import { detectLang, tokenizeLine } from '../../lib/syntaxHighlight'
 
 const STATUS_LABELS = { M: 'Modified', A: 'Added', D: 'Deleted', R: 'Renamed', C: 'Copied', '?': 'Untracked' }
