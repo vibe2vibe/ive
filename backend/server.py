@@ -2122,6 +2122,11 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                                             break
 
                         auto_approved_names = []
+                        # Always reset per PTY-start. ws_handler is a long-lived
+                        # coroutine — without an explicit reset, MCPs from the
+                        # previous session linger in this scope and contaminate
+                        # the next session's config file.
+                        _mcp_json = {"mcpServers": {}}
                         for srv in mcp_servers_for_session:
                             resolved_env = {}
                             for ek, ev in srv["env"].items():
@@ -2171,9 +2176,8 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                                     except Exception as e:
                                         logger.warning(f"Failed to register MCP {srv['server_name']}: {e}")
                             else:
-                                # config_file strategy: collect into JSON config
-                                if "_mcp_json" not in dir():
-                                    _mcp_json = {"mcpServers": {}}
+                                # config_file strategy: collect into JSON config.
+                                # _mcp_json is reset before the loop above.
                                 entry = {"command": srv["command"], "args": srv["args"]}
                                 if resolved_env:
                                     entry["env"] = resolved_env
