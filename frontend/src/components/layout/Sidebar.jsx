@@ -823,12 +823,14 @@ export default function Sidebar() {
   const [newSessionFor, setNewSessionFor] = useState(null)
   const [filter, setFilter] = useState('')
 
-  // Close picker popups on outside click
+  // Close picker popups on outside click. Defer attaching the listener so
+  // the click that opened the picker doesn't immediately close it as it
+  // bubbles to window.
   useEffect(() => {
     if (!showCommanderPicker && !showTesterPicker && !showDocumentorPicker) return
     const close = () => { setShowCommanderPicker(false); setShowTesterPicker(false); setShowDocumentorPicker(false) }
-    window.addEventListener('click', close)
-    return () => window.removeEventListener('click', close)
+    const id = setTimeout(() => window.addEventListener('click', close), 0)
+    return () => { clearTimeout(id); window.removeEventListener('click', close) }
   }, [showCommanderPicker, showTesterPicker, showDocumentorPicker])
 
   // Drag-reorder state
