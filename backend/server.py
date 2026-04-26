@@ -11863,8 +11863,8 @@ async def create_research_schedule(request: web.Request) -> web.Response:
     enabled = 1 if body.get("enabled", True) else 0
 
     # Compute next_run_at
-    from datetime import datetime, timedelta
-    now = datetime.utcnow()
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
     next_run = (now + timedelta(hours=interval_hours)).strftime("%Y-%m-%d %H:%M:%S")
 
     db = await get_db()
@@ -11914,9 +11914,9 @@ async def update_research_schedule(request: web.Request) -> web.Response:
             updates.append("updated_at = datetime('now')")
             # Recompute next_run if interval changed
             if "interval_hours" in body:
-                from datetime import datetime, timedelta
+                from datetime import datetime, timedelta, timezone
                 interval = body["interval_hours"]
-                next_run = (datetime.utcnow() + timedelta(hours=interval)).strftime("%Y-%m-%d %H:%M:%S")
+                next_run = (datetime.now(timezone.utc) + timedelta(hours=interval)).strftime("%Y-%m-%d %H:%M:%S")
                 updates.append("next_run_at = ?")
                 params.append(next_run)
 
@@ -11950,11 +11950,11 @@ async def _research_scheduler_loop():
     while True:
         try:
             await _asyncio.sleep(60)  # check every minute
-            from datetime import datetime
+            from datetime import datetime, timezone
 
             db = await get_db()
             try:
-                now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                 cur = await db.execute(
                     "SELECT * FROM research_schedules WHERE enabled = 1 AND next_run_at <= ?",
                     (now,),
@@ -12026,7 +12026,7 @@ async def _research_scheduler_loop():
                 # Update schedule: last_run_at + next_run_at
                 from datetime import timedelta
                 interval = sched.get("interval_hours", 24)
-                next_run = (datetime.utcnow() + timedelta(hours=interval)).strftime("%Y-%m-%d %H:%M:%S")
+                next_run = (datetime.now(timezone.utc) + timedelta(hours=interval)).strftime("%Y-%m-%d %H:%M:%S")
 
                 db4 = await get_db()
                 try:
