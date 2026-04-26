@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IVE — Humanity's Last IDE</title>
+<meta name="description" content="Control an army of AI agents from one screen. Real terminals, visual pipelines, autonomous coding. All local.">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --cyan: #00f0ff;
+  --violet: #8b5cf6;
+  --magenta: #d946ef;
+  --bg: #04040c;
+  --bg2: #080814;
+  --text: #e2e8f0;
+  --dim: #64748b;
+  --mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+/* ===== ANIMATIONS ===== */
+@keyframes float1 { 0%,100% { transform: translate(0,0); } 50% { transform: translate(30px,-20px); } }
+@keyframes float2 { 0%,100% { transform: translate(0,0); } 50% { transform: translate(-25px,15px); } }
+@keyframes featureCycle { 0% { opacity: 0; transform: translateY(14px); } 2% { opacity: 1; transform: translateY(0); } 9% { opacity: 1; transform: translateY(0); } 11% { opacity: 0; transform: translateY(-14px); } 100% { opacity: 0; } }
+@keyframes lockPulse { 0%,100% { box-shadow: 0 0 40px rgba(139,92,246,0.15); } 50% { box-shadow: 0 0 80px rgba(0,240,255,0.25); } }
+@keyframes lockShake { 0%,100% { transform: translateX(0); } 20% { transform: translateX(-12px); } 40% { transform: translateX(10px); } 60% { transform: translateX(-8px); } 80% { transform: translateX(6px); } }
+@keyframes loadSpin { to { transform: rotate(360deg); } }
+
+/* ===== LOCK SCREEN ===== */
+.lock-screen {
+  display: flex; align-items: center; justify-content: center;
+  flex-direction: column; min-height: 100vh;
+  position: relative; overflow: hidden;
+}
+.lock-orb-1 {
+  position: absolute; width: 500px; height: 500px; border-radius: 50%;
+  top: 10%; left: -10%;
+  background: radial-gradient(circle, rgba(139,92,246,0.12), transparent 70%);
+  filter: blur(80px); pointer-events: none; animation: float1 8s ease-in-out infinite;
+}
+.lock-orb-2 {
+  position: absolute; width: 400px; height: 400px; border-radius: 50%;
+  bottom: 10%; right: -5%;
+  background: radial-gradient(circle, rgba(0,240,255,0.08), transparent 70%);
+  filter: blur(80px); pointer-events: none; animation: float2 10s ease-in-out infinite;
+}
+.lock-content { position: relative; z-index: 1; text-align: center; max-width: 560px; padding: 0 24px; }
+.lock-badge {
+  display: inline-block; padding: 6px 18px; border-radius: 20px; margin-bottom: 24px;
+  font-size: 10px; font-weight: 800; letter-spacing: 5px; text-transform: uppercase;
+  color: #ef4444; background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.2);
+}
+.lock-icon {
+  width: 72px; height: 72px; margin: 0 auto 28px;
+  background: rgba(139,92,246,0.08); border: 1px solid rgba(139,92,246,0.15);
+  border-radius: 20px; display: flex; align-items: center; justify-content: center;
+  animation: lockPulse 3s ease-in-out infinite;
+}
+.lock-icon svg { width: 32px; height: 32px; stroke: var(--violet); fill: none; stroke-width: 2; }
+.lock-title {
+  font-size: clamp(24px, 4vw, 36px); font-weight: 800; color: #fff; margin-bottom: 12px; line-height: 1.2;
+}
+.lock-subtitle { font-size: 15px; color: var(--dim); margin-bottom: 32px; line-height: 1.7; }
+.lock-subtitle strong { color: #94a3b8; }
+
+/* Feature carousel */
+.lock-features { height: 36px; position: relative; margin-bottom: 36px; overflow: hidden; }
+.lock-feature-item {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  gap: 10px; opacity: 0;
+  font-size: 14px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+}
+.lock-feature-item:nth-child(1)  { animation: featureCycle 27s ease-in-out infinite 0s;   color: var(--cyan); }
+.lock-feature-item:nth-child(2)  { animation: featureCycle 27s ease-in-out infinite 3s;   color: var(--violet); }
+.lock-feature-item:nth-child(3)  { animation: featureCycle 27s ease-in-out infinite 6s;   color: var(--magenta); }
+.lock-feature-item:nth-child(4)  { animation: featureCycle 27s ease-in-out infinite 9s;   color: #22c55e; }
+.lock-feature-item:nth-child(5)  { animation: featureCycle 27s ease-in-out infinite 12s;  color: #f59e0b; }
+.lock-feature-item:nth-child(6)  { animation: featureCycle 27s ease-in-out infinite 15s;  color: #ef4444; }
+.lock-feature-item:nth-child(7)  { animation: featureCycle 27s ease-in-out infinite 18s;  color: #06b6d4; }
+.lock-feature-item:nth-child(8)  { animation: featureCycle 27s ease-in-out infinite 21s;  color: #3b82f6; }
+.lock-feature-item:nth-child(9)  { animation: featureCycle 27s ease-in-out infinite 24s;  color: #a78bfa; }
+.lock-feature-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; opacity: 0.6; }
+
+/* Password input */
+.pin-wrap {
+  display: flex; gap: 12px; justify-content: center; margin-bottom: 20px;
+  max-width: 360px; margin-left: auto; margin-right: auto;
+}
+.pin-field {
+  flex: 1; height: 52px; border-radius: 12px; padding: 0 20px;
+  background: rgba(255,255,255,0.03); border: 2px solid rgba(255,255,255,0.08);
+  font-family: var(--mono); font-size: 16px; font-weight: 600; color: #fff;
+  outline: none; caret-color: var(--cyan); letter-spacing: 2px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.pin-field::placeholder { color: #374151; font-weight: 400; letter-spacing: 0; }
+.pin-field:focus { border-color: rgba(139,92,246,0.5); box-shadow: 0 0 20px rgba(139,92,246,0.15); }
+.pin-field.error { border-color: rgba(239,68,68,0.5); animation: lockShake 0.4s ease; }
+.btn-pin {
+  padding: 0 24px; height: 52px; border-radius: 12px; border: none; cursor: pointer;
+  background: linear-gradient(135deg, var(--violet), var(--cyan));
+  color: var(--bg); font-size: 14px; font-weight: 700; white-space: nowrap;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.btn-pin:hover { transform: translateY(-2px); box-shadow: 0 4px 20px rgba(139,92,246,0.3); }
+.btn-pin:disabled { opacity: 0.5; cursor: wait; }
+
+.pin-hint { font-size: 12px; color: #475569; margin-bottom: 24px; }
+.pin-error-msg { font-size: 13px; color: #ef4444; height: 20px; margin-bottom: 8px; }
+
+.lock-date {
+  display: inline-block; padding: 10px 24px; border-radius: 10px; margin-top: 12px;
+  background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06);
+  font-size: 13px; font-weight: 600; color: #94a3b8; letter-spacing: 1px;
+}
+.lock-date span { color: var(--cyan); font-weight: 800; }
+.lock-apply { display: block; margin-top: 20px; font-size: 12px; color: var(--dim); }
+.lock-apply a { color: var(--violet); font-weight: 600; cursor: pointer; text-decoration: none; }
+.lock-apply a:hover { color: var(--cyan); }
+
+/* Waitlist counter */
+.waitlist-counter {
+  margin-top: 28px; padding: 16px 28px; border-radius: 12px;
+  background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06);
+  display: inline-block;
+}
+.waitlist-bar-wrap {
+  width: 240px; height: 6px; border-radius: 3px; margin: 10px auto 8px;
+  background: rgba(255,255,255,0.06); overflow: hidden;
+}
+.waitlist-bar {
+  height: 100%; border-radius: 3px;
+  background: linear-gradient(90deg, var(--cyan), var(--violet), var(--magenta));
+  transition: width 1.5s ease-out;
+}
+.waitlist-num {
+  font-size: 22px; font-weight: 900; font-family: var(--mono);
+  background: linear-gradient(135deg, var(--cyan), var(--violet));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.waitlist-of { font-size: 14px; color: var(--dim); font-weight: 600; }
+.waitlist-label { font-size: 11px; color: #475569; letter-spacing: 1px; margin-top: 4px; }
+.waitlist-urgency { font-size: 11px; color: #ef4444; font-weight: 700; letter-spacing: 1px; margin-top: 6px; }
+
+/* Loading state after unlock */
+.loading-site {
+  display: none; align-items: center; justify-content: center; flex-direction: column;
+  gap: 16px; min-height: 100vh;
+}
+.loading-site.active { display: flex; }
+.loading-spinner {
+  width: 40px; height: 40px; border-radius: 50%;
+  border: 3px solid rgba(139,92,246,0.15);
+  border-top-color: var(--violet);
+  animation: loadSpin 0.8s linear infinite;
+}
+.loading-text { font-size: 14px; color: var(--dim); letter-spacing: 1px; }
+
+@media (max-width: 600px) {
+  .pin-wrap { max-width: 100%; }
+}
+</style>
+</head>
+<body>
+
+<!-- LOCK SCREEN -->
+<div class="lock-screen" id="lockScreen">
+  <div class="lock-orb-1"></div>
+  <div class="lock-orb-2"></div>
+  <div class="lock-content">
+    <div class="lock-badge">Top Secret</div>
+    <div class="lock-icon">
+      <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+    </div>
+    <h1 class="lock-title">Ask us for the password first.</h1>
+    <p class="lock-subtitle">This is a <strong>top secret release</strong>. Private access only.<br>If you've been invited, enter the password below.</p>
+
+    <div class="lock-features">
+      <div class="lock-feature-item"><span class="lock-feature-dot"></span> Real PTY Terminals</div>
+      <div class="lock-feature-item"><span class="lock-feature-dot"></span> Visual Pipelines</div>
+      <div class="lock-feature-item"><span class="lock-feature-dot"></span> Agent Orchestration</div>
+      <div class="lock-feature-item"><span class="lock-feature-dot"></span> Deep Research Engine</div>
+      <div class="lock-feature-item"><span class="lock-feature-dot"></span> 8,000+ Agent Skills</div>
+      <div class="lock-feature-item"><span class="lock-feature-dot"></span> Supply Chain Security</div>
+      <div class="lock-feature-item"><span class="lock-feature-dot"></span> Memory Sync</div>
+      <div class="lock-feature-item"><span class="lock-feature-dot"></span> Multi-CLI Support</div>
+      <div class="lock-feature-item"><span class="lock-feature-dot"></span> Plugin Marketplace</div>
+    </div>
+
+    <div class="pin-error-msg" id="pinError"></div>
+    <div class="pin-wrap">
+      <input type="password" class="pin-field" id="pinField" placeholder="Enter password" autocomplete="off" autofocus>
+      <button class="btn-pin" id="pinSubmit">Unlock</button>
+    </div>
+    <p class="pin-hint">Authorized testers only</p>
+
+    <div class="lock-date">GitHub release <span>28.04.2026</span> &mdash; Beta already available</div>
+
+    <div class="waitlist-counter">
+      <span class="waitlist-num" id="wlCount">91</span>
+      <span class="waitlist-of"> / 120 spots claimed</span>
+      <div class="waitlist-bar-wrap"><div class="waitlist-bar" id="wlBar" style="width:0%"></div></div>
+      <div class="waitlist-label">Join the waitlist before it fills up</div>
+      <div class="waitlist-urgency" id="wlUrgency">Only 29 spots remaining</div>
+    </div>
+
+    <p class="lock-apply">Want access? <a id="lockApplyLink" href="#">Ask for the password to apply.</a></p>
+  </div>
+</div>
+
+<!-- LOADING STATE (shown while fetching site content) -->
+<div class="loading-site" id="loadingState">
+  <div class="loading-spinner"></div>
+  <div class="loading-text">Loading IVE...</div>
+</div>
+
+<script>
+const SB_URL = 'https://vjqdpsdcxgusnmemsnsq.supabase.co';
+const SB_KEY = 'sb_publishable_B2-HbXUlnXuECLPJosHa7w_-vn39nxW';
+const sb = window.supabase.createClient(SB_URL, SB_KEY);
+
+const lockScreen = document.getElementById('lockScreen');
+const loadingState = document.getElementById('loadingState');
+const pinField = document.getElementById('pinField');
+const pinSubmit = document.getElementById('pinSubmit');
+const pinError = document.getElementById('pinError');
+
+// Already unlocked this session? Load directly.
+if (sessionStorage.getItem('ive-unlocked') === '1') {
+  lockScreen.style.display = 'none';
+  loadSite();
+}
+
+async function tryUnlock() {
+  const attempt = pinField.value.trim();
+  if (!attempt) return;
+
+  pinSubmit.disabled = true;
+  pinSubmit.textContent = 'Verifying...';
+  pinError.textContent = '';
+
+  try {
+    const { data, error } = await sb.rpc('verify_pin', { attempt });
+    if (error) throw error;
+
+    if (data === true) {
+      sessionStorage.setItem('ive-unlocked', '1');
+      lockScreen.style.display = 'none';
+      await loadSite();
+    } else {
+      pinError.textContent = 'Wrong password. Ask us for access.';
+      pinField.classList.add('error');
+      pinField.value = '';
+      setTimeout(() => pinField.classList.remove('error'), 500);
+      pinField.focus();
+    }
+  } catch (err) {
+    pinError.textContent = 'Connection error. Try again.';
+    console.error('Verify error:', err);
+  }
+
+  pinSubmit.disabled = false;
+  pinSubmit.textContent = 'Unlock';
+}
+
+async function loadSite() {
+  loadingState.classList.add('active');
+
+  try {
+    // Fetch full site HTML + signed video URL from Supabase RPC
+    const { data, error } = await sb.rpc('get_site_content');
+    if (error) throw error;
+
+    if (data && data.html) {
+      // Replace entire page with the real site
+      document.open();
+      document.write(data.html);
+      document.close();
+    } else {
+      loadingState.innerHTML = '<div style="color:#ef4444;font-size:14px;">Failed to load site content.</div>';
+    }
+  } catch (err) {
+    console.error('Load error:', err);
+    loadingState.innerHTML = '<div style="color:#ef4444;font-size:14px;">Failed to load. Refresh and try again.</div>';
+  }
+}
+
+pinSubmit.addEventListener('click', tryUnlock);
+pinField.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryUnlock(); });
+
+document.getElementById('lockApplyLink').addEventListener('click', (e) => {
+  e.preventDefault();
+  pinField.classList.add('error');
+  setTimeout(() => pinField.classList.remove('error'), 500);
+  pinError.textContent = 'Enter the password to access the site and apply.';
+  pinField.focus();
+});
+
+const WL_TOTAL = 120;
+let wlCurrent = 91;
+const wlCount = document.getElementById('wlCount');
+const wlBar = document.getElementById('wlBar');
+const wlUrgency = document.getElementById('wlUrgency');
+
+function renderWl(n) {
+  wlCurrent = Math.min(n, WL_TOTAL);
+  wlCount.textContent = wlCurrent;
+  wlBar.style.width = (wlCurrent / WL_TOTAL * 100).toFixed(1) + '%';
+  const remaining = WL_TOTAL - wlCurrent;
+  if (remaining <= 5) {
+    wlUrgency.textContent = 'Almost full — ' + remaining + ' spot' + (remaining !== 1 ? 's' : '') + ' left!';
+    wlUrgency.style.color = '#ef4444';
+  } else if (remaining <= 15) {
+    wlUrgency.textContent = 'Filling fast — only ' + remaining + ' spots remaining';
+    wlUrgency.style.color = '#f59e0b';
+  } else {
+    wlUrgency.textContent = 'Only ' + remaining + ' spots remaining';
+  }
+}
+
+async function fetchWlCount() {
+  try {
+    const { data, error } = await sb.rpc('get_waitlist_count');
+    if (!error && typeof data === 'number') renderWl(data);
+  } catch {}
+}
+
+setTimeout(() => renderWl(91), 300);
+fetchWlCount();
+</script>
+</body>
+</html>
