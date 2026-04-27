@@ -1,6 +1,7 @@
 """aiohttp server — REST routes + WebSocket with PTY terminal support."""
 
 import asyncio
+import codecs
 import datetime
 import json
 import logging
@@ -367,6 +368,49 @@ import time as _time
 
 _output_buffers: dict[str, list[bytes]] = {}
 _output_timers: dict[str, _asyncio.TimerHandle] = {}
+# Per-session incremental UTF-8 decoder — holds incomplete codepoints across
+# flushes so a multi-byte char split between chunks doesn't render as U+FFFD.
+_output_decoders: dict[str, codecs.IncrementalDecoder] = {}
+# Per-session bytes held back at flush time because they look like the start
+# of an incomplete ANSI escape sequence. Prepended to the next flush.
+_output_held_bytes: dict[str, bytes] = {}
+
+
+def _split_ansi_tail(data: bytes) -> tuple[bytes, bytes]:
+    """Split data into (safe_to_emit, hold_for_next_flush).
+
+    Detects an incomplete ANSI escape sequence at the tail of `data` and
+    returns the trailing partial bytes separately so they can be combined
+    with the next chunk. xterm.js's parser resets per write(), so emitting
+    half of a CSI ends up rendering the leading bytes as garbled state and
+    the trailing bytes as literal text — visible as the position drift in
+    streamed Claude output.
+    """
+    if not data:
+        return b"", b""
+    last_esc = data.rfind(b"\x1b")
+    if last_esc == -1:
+        return data, b""
+    rest = data[last_esc + 1:]
+    if not rest:
+        return data[:last_esc], data[last_esc:]
+    first = rest[0]
+    if first == 0x5B:  # CSI: ESC [ <params 0x30-0x3F>* <inter 0x20-0x2F>* <final 0x40-0x7E>
+        for b in rest[1:]:
+            if 0x40 <= b <= 0x7E:
+                return data, b""  # complete CSI
+            if not (0x20 <= b <= 0x3F):
+                return data, b""  # malformed; let xterm handle
+        return data[:last_esc], data[last_esc:]  # incomplete CSI
+    if first == 0x5D:  # OSC: ESC ] ... <BEL or ST>
+        if 0x07 in rest or b"\x1b\\" in rest:
+            return data, b""
+        return data[:last_esc], data[last_esc:]
+    if first == 0x4F:  # SS3: ESC O <one byte>
+        return (data, b"") if len(rest) >= 2 else (data[:last_esc], data[last_esc:])
+    # Other ESC + 1 byte sequences are already complete (rest[0] is the byte)
+    return data, b""
+
 
 def _schedule_flush(session_id: str):
     if session_id in _output_timers:
@@ -383,10 +427,39 @@ def _schedule_flush(session_id: str):
 async def _flush_output(session_id: str):
     _output_timers.pop(session_id, None)
     chunks = _output_buffers.pop(session_id, [])
-    if not chunks:
+    held = _output_held_bytes.pop(session_id, b"")
+    if not chunks and not held:
         return
-    raw = b"".join(chunks)
-    text = raw.decode("utf-8", errors="replace")
+
+    # If new chunks arrived, combine with held bytes and re-split the tail.
+    # If only held bytes remain (timer fired with no new output), force-emit
+    # them — they're either a genuinely partial sequence Claude never finished
+    # or held bytes from a prior flush whose follow-up never came.
+    if chunks:
+        raw = held + b"".join(chunks)
+        safe, hold = _split_ansi_tail(raw)
+    else:
+        safe, hold = held, b""
+
+    if hold:
+        _output_held_bytes[session_id] = hold
+        # Schedule a stale flush so genuinely-partial sequences eventually
+        # reach the terminal even if no further output arrives.
+        if session_id not in _output_timers:
+            loop = _asyncio.get_event_loop()
+            _output_timers[session_id] = loop.call_later(
+                0.1, lambda: _asyncio.ensure_future(_flush_output(session_id)))
+
+    if not safe:
+        return
+
+    decoder = _output_decoders.get(session_id)
+    if decoder is None:
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        _output_decoders[session_id] = decoder
+    text = decoder.decode(safe)
+    if not text:
+        return
     msg = json.dumps({"session_id": session_id, "type": "output", "data": text})
     dead = []
     for ws in ws_clients:
@@ -500,6 +573,8 @@ async def handle_pty_exit(session_id: str, code: int):
     _input_bufs.pop(session_id, None)
     _session_turns.pop(session_id, None)
     _input_esc.pop(session_id, None)
+    _output_decoders.pop(session_id, None)
+    _output_held_bytes.pop(session_id, None)
     _session_workspace.pop(session_id, None)
 
 
