@@ -19,6 +19,7 @@ import urllib.parse
 API_URL = os.environ.get("COMMANDER_API_URL", "http://127.0.0.1:5111")
 SESSION_ID = os.environ.get("WORKER_SESSION_ID", "")
 WORKSPACE_ID = os.environ.get("WORKER_WORKSPACE_ID", "")
+SESSION_TYPE = os.environ.get("WORKER_SESSION_TYPE", "worker")
 
 
 def api_call(method: str, path: str, body: dict | None = None) -> dict | list:
@@ -848,6 +849,60 @@ W2W_BULLETIN_TOOLS = {
 }
 
 
+# ─── Planner-only tools (gated on session_type='planner') ──────────────
+#
+# Planners decompose an intent task into sub-tasks on the feature board,
+# then stop. They need create_task to file those sub-tasks. Regular workers
+# (implementers, testers) must NOT have this — if they did, they could
+# spawn arbitrary work mid-implementation and the orchestration tree would
+# fan out uncontrollably. Workers that discover new work post a peer
+# message instead and let the Commander decide.
+
+
+def tool_create_task(args: dict) -> str:
+    """Create a sub-task on the feature board.
+
+    Allowed for planner sessions only. Auto-tags the new task as a sibling
+    sub-task of the planner's currently-assigned intent task — depends_on
+    can still be set explicitly when ordering between sub-tasks matters.
+    """
+    body = {
+        "workspace_id": WORKSPACE_ID,
+        "title": args["title"],
+    }
+    for key in ("description", "acceptance_criteria", "priority", "labels", "depends_on"):
+        if key in args:
+            body[key] = args[key]
+    result = api_call("POST", "/tasks", body)
+    return json.dumps(result, indent=2)
+
+
+PLANNER_TOOLS = {
+    "create_task": {
+        "handler": tool_create_task,
+        "description": (
+            "File a new sub-task on the feature board. Planner-only. Use this "
+            "to decompose your assigned intent task into one or more concrete "
+            "sub-tasks for the Commander to dispatch. After filing, mark your "
+            "own task status='review' and stop. Do not implement the sub-tasks "
+            "yourself."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Short, action-oriented title."},
+                "description": {"type": "string", "description": "What the task entails — concrete, scoped."},
+                "acceptance_criteria": {"type": "string", "description": "Bulleted criteria for 'done'."},
+                "priority": {"type": "string", "enum": ["low", "medium", "high"], "description": "Default: medium."},
+                "labels": {"type": "array", "items": {"type": "string"}, "description": "e.g. ['implementation','frontend']."},
+                "depends_on": {"type": "array", "items": {"type": "string"}, "description": "Task IDs this sub-task waits on. Use to encode ordering between sub-tasks."},
+            },
+            "required": ["title"],
+        },
+    },
+}
+
+
 # ─── Myelin coordination tools (gated on experimental flag) ────────────
 
 MYELIN_COORD_TOOLS = {
@@ -1017,6 +1072,12 @@ def main():
     # session restart (matches the checkpoint/model-switching pattern).
     if flags.get("coordination") and _app_setting("experimental_myelin_coordination") == "on":
         TOOLS.update(MYELIN_COORD_TOOLS)
+
+    # Planner-only tools (gated on the session type plumbed through env at
+    # PTY-spawn time). Planners need create_task to decompose intent tasks
+    # into sub-tasks; regular workers must not have it.
+    if SESSION_TYPE == "planner":
+        TOOLS.update(PLANNER_TOOLS)
 
     try:
         for line in sys.stdin:

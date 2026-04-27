@@ -2212,6 +2212,7 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                                     .replace("{workspace_id}", config.get("workspace_id", ""))
                                     .replace("{workspace_path}", config.get("workspace_path", ""))
                                     .replace("{session_id}", session_id)
+                                    .replace("{session_type}", config.get("session_type") or "worker")
                                 )
                             effective_approve = (
                                 srv["auto_approve_override"]
@@ -3111,6 +3112,7 @@ async def create_session(request: web.Request) -> web.Response:
                                         .replace("{port}", str(PORT))
                                         .replace("{workspace_id}", config.get("workspace_id", ""))
                                         .replace("{session_id}", session_id)
+                                        .replace("{session_type}", config.get("session_type") or "worker")
                                     )
                                 entry = {"command": srv["command"], "args": srv_args}
                                 if resolved_env:

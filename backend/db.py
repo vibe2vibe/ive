@@ -980,6 +980,7 @@ SEED_MCP_SERVERS = [
             "COMMANDER_API_URL": "http://{host}:{port}",
             "WORKER_SESSION_ID": "{session_id}",
             "WORKER_WORKSPACE_ID": "{workspace_id}",
+            "WORKER_SESSION_TYPE": "{session_type}",
         },
         "auto_approve": 1,
         "default_enabled": 0,
@@ -1362,8 +1363,9 @@ async def init_db():
             "UPDATE mcp_servers SET default_enabled = 1 WHERE id = 'builtin-commander'"
         )
 
-        # Backfill worker-board env with workspace_id (existing DBs won't pick up
-        # SEED_MCP_SERVERS changes since INSERT OR IGNORE skips existing rows)
+        # Backfill worker-board env (existing DBs won't pick up SEED_MCP_SERVERS
+        # changes since INSERT OR IGNORE skips existing rows). Add any missing
+        # keys without disturbing user customizations.
         try:
             cur = await db.execute(
                 "SELECT env FROM mcp_servers WHERE id = 'builtin-worker-board'"
@@ -1371,8 +1373,15 @@ async def init_db():
             row = await cur.fetchone()
             if row:
                 env = json.loads(row["env"] or "{}")
-                if "WORKER_WORKSPACE_ID" not in env:
-                    env["WORKER_WORKSPACE_ID"] = "{workspace_id}"
+                changed = False
+                for key, default in (
+                    ("WORKER_WORKSPACE_ID", "{workspace_id}"),
+                    ("WORKER_SESSION_TYPE", "{session_type}"),
+                ):
+                    if key not in env:
+                        env[key] = default
+                        changed = True
+                if changed:
                     await db.execute(
                         "UPDATE mcp_servers SET env = ? WHERE id = 'builtin-worker-board'",
                         (json.dumps(env),),
