@@ -585,7 +585,7 @@ def tool_save_memory(args: dict) -> str:
     if mem_type not in _VALID_MEMORY_TYPES:
         return json.dumps({"ok": False, "error": f"type must be one of {sorted(_VALID_MEMORY_TYPES)}"})
 
-    existing = api_call("GET", f"/memory?workspace_id={urllib.parse.quote(ws_id)}")
+    existing = api_call("GET", f"/memory?workspace={urllib.parse.quote(ws_id)}")
     match_id = None
     if isinstance(existing, list):
         for e in existing:
@@ -632,7 +632,7 @@ def tool_headsup(args: dict) -> str:
 def tool_list_worker_digests(args: dict) -> str:
     """Get a birds-eye view of what all workers are currently doing — their task, focus, decisions, discoveries, files touched, and domain tags."""
     ws_id = args.get("workspace_id", WORKSPACE_ID)
-    sessions = api_call("GET", f"/sessions?workspace_id={ws_id}")
+    sessions = api_call("GET", f"/sessions?workspace={ws_id}")
     digests = []
     if isinstance(sessions, list):
         for s in sessions:
