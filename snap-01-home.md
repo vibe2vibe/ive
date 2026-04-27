@@ -1,0 +1,307 @@
+- generic [ref=e3]:
+  - complementary [ref=e5]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - generic [ref=e8]:
+          - img [ref=e9]
+          - generic [ref=e16]: IVE
+        - button [ref=e18] [cursor=pointer]:
+          - img [ref=e19]
+      - generic [ref=e20]:
+        - img [ref=e21]
+        - textbox "filter sessions..." [ref=e24]
+    - generic [ref=e25]:
+      - generic [ref=e484]:
+        - button "test Change project color" [ref=e485] [cursor=pointer]:
+          - img [ref=e486]
+          - img [ref=e493]
+          - img [ref=e495]
+          - generic [ref=e497]: test
+          - button "Change project color" [ref=e498]
+          - img [ref=e499]
+        - generic [ref=e502]:
+          - button "⚙ auto" [ref=e503] [cursor=pointer]
+          - button "Select for merge Session 04c5eeb7 sonnet Idle" [ref=e508] [cursor=pointer]
+          - button "Select for merge somesession-test sonnet Idle" [ref=e519] [cursor=pointer]
+          - button "Select for merge Session f74a0c28 sonnet Idle" [ref=e530] [cursor=pointer]
+          - button "Select for merge todo-app-planner sonnet Idle" [ref=e541] [cursor=pointer]
+          - button "Select for merge Plan for TODO app sonnet Idle" [ref=e552] [cursor=pointer]
+          - button "Select for merge Commander (Claude) — test opus Idle" [ref=e563] [cursor=pointer]
+          - button "Select for merge lkjlkj sonnet Idle" [ref=e574] [cursor=pointer]
+          - button "Select for merge hooks-test-session sonnet z0 Idle" [ref=e585] [cursor=pointer]
+          - button "Select for merge Merge Source A sonnet Idle" [ref=e597] [cursor=pointer]
+          - button "Select for merge Merge Source B opus Idle" [ref=e608] [cursor=pointer]
+          - button "Select for merge E2E System Prompt Test sonnet Idle" [ref=e619] [cursor=pointer]
+          - 'button "Select for merge Merged: Merge Source A + Merge Source B sonnet Idle" [ref=e630] [cursor=pointer]'
+          - 'button "Select for merge Merged: Merge Source A + Merge Source B sonnet Idle" [ref=e641] [cursor=pointer]'
+          - 'button "Select for merge Merged: Merge Source A + Merge Source B sonnet Idle" [ref=e652] [cursor=pointer]'
+          - button "Select for merge Merge Target haiku Idle" [ref=e663] [cursor=pointer]
+          - button "Select for merge Rich Clone Source opus Idle" [ref=e674] [cursor=pointer]
+          - button "Select for merge Session From Template opus Idle" [ref=e685] [cursor=pointer]
+          - button "Select for merge Rich Clone Source (clone) haiku Idle" [ref=e696] [cursor=pointer]
+          - button "Select for merge E2E Gemini Test gemini-2.5-pro Idle" [ref=e707] [cursor=pointer]
+          - button "Select for merge Rich Clone Source (clone) gemini-2.5-pro Idle" [ref=e718] [cursor=pointer]
+          - 'button "Select for merge Branch: feature/test-branch sonnet z0 Idle" [ref=e729] [cursor=pointer]'
+          - button "Select for merge E2E System Prompt Test (clone) sonnet Idle" [ref=e741] [cursor=pointer]
+          - button "Select for merge E2E Commander Test opus Idle" [ref=e752] [cursor=pointer]
+          - button "Select for merge E2E Test Worker sonnet Idle" [ref=e763] [cursor=pointer]
+          - button "Select for merge integration-test-worker sonnet Idle" [ref=e774] [cursor=pointer]
+          - button "Select for merge Session DoomTest sonnet Idle" [ref=e785] [cursor=pointer]
+          - button "Select for merge Session CycleTest sonnet Idle" [ref=e796] [cursor=pointer]
+          - button "Select for merge Session SubagentTest sonnet Idle" [ref=e807] [cursor=pointer]
+          - button "Select for merge Session CycleTest2 sonnet Idle" [ref=e818] [cursor=pointer]
+          - button "Select for merge My Custom Name sonnet Idle" [ref=e829] [cursor=pointer]
+          - button "Select for merge Session 42 sonnet Idle" [ref=e840] [cursor=pointer]
+          - button "Select for merge Commander (Claude Code) — test opus Idle" [ref=e851] [cursor=pointer]
+          - button "Select for merge Session Learn sonnet Idle" [ref=e862] [cursor=pointer]
+          - button "Select for merge Session AutoDistill sonnet Idle" [ref=e873] [cursor=pointer]
+          - button "Select for merge Session E2E-Test haiku Idle" [ref=e884] [cursor=pointer]
+          - button "Select for merge E2E-RealTest haiku Idle" [ref=e895] [cursor=pointer]
+          - button "Select for merge E2E-HookDebug haiku Idle" [ref=e906] [cursor=pointer]
+          - button "Select for merge E2E-Diag haiku Idle" [ref=e917] [cursor=pointer]
+          - button "Select for merge E2E-Final haiku Idle" [ref=e928] [cursor=pointer]
+          - button "Select for merge E2E-HookType haiku Idle" [ref=e939] [cursor=pointer]
+          - button "Select for merge Claude Code session greeting haiku Idle" [ref=e950] [cursor=pointer]
+          - button "Select for merge End-to-end test execution haiku Idle" [ref=e961] [cursor=pointer]
+          - button "Select for merge Deep Research — AI safety alignment techniques sonnet Idle" [ref=e972] [cursor=pointer]
+          - button "Select for merge Session doom-test haiku Idle" [ref=e983] [cursor=pointer]
+          - button "Select for merge Session cycle-test haiku Idle" [ref=e994] [cursor=pointer]
+          - button "Select for merge Session subagent-test haiku Idle" [ref=e1005] [cursor=pointer]
+          - button "Select for merge Session empty-distill-test haiku Idle" [ref=e1016] [cursor=pointer]
+          - button "Select for merge IDE extension installation troubleshooting haiku Idle" [ref=e1027] [cursor=pointer]
+          - button "Select for merge Plan mode auto functionality unavailable haiku Idle" [ref=e1038] [cursor=pointer]
+          - button "Select for merge Session title-quality-test haiku Idle" [ref=e1049] [cursor=pointer]
+          - button "Select for merge Implementing prime number checker haiku Idle" [ref=e1060] [cursor=pointer]
+          - button "Select for merge Deep Research — MCP data source test sonnet Idle" [ref=e1071] [cursor=pointer]
+          - button "Select for merge Simple addition problem haiku Idle" [ref=e1082] [cursor=pointer]
+          - button "Select for merge Capital of France haiku Idle" [ref=e1093] [cursor=pointer]
+          - button "Select for merge Python string reversal function haiku Idle" [ref=e1104] [cursor=pointer]
+          - button "Select for merge E2E test message output haiku Idle" [ref=e1115] [cursor=pointer]
+          - button "Select for merge Deep Research — scheduler trigger test - quantum computing breakth sonnet Idle" [ref=e1126] [cursor=pointer]
+          - button "Select for merge Distill Test Session sonnet Idle" [ref=e1137] [cursor=pointer]
+          - button "Select for merge test-feature-worker sonnet Idle" [ref=e1148] [cursor=pointer]
+          - button "New Session" [ref=e1158] [cursor=pointer]
+      - generic [ref=e1160]:
+        - button "w2w-live-638468df Change project color" [ref=e1161] [cursor=pointer]:
+          - img [ref=e1162]
+          - img [ref=e1169]
+          - img [ref=e1171]
+          - generic [ref=e1173]: w2w-live-638468df
+          - button "Change project color" [ref=e1174]
+          - img [ref=e1175]
+        - generic [ref=e1178]:
+          - button "⚙ plans" [ref=e1179] [cursor=pointer]
+          - button "Select for merge Other Workspace Session sonnet Idle" [ref=e1184] [cursor=pointer]
+          - button "New Session" [ref=e1194] [cursor=pointer]
+      - generic [ref=e1196]:
+        - button "ive Change project color" [ref=e1197] [cursor=pointer]:
+          - img [ref=e1198]
+          - img [ref=e1205]
+          - img [ref=e1207]
+          - generic [ref=e1209]: ive
+          - button "Change project color" [ref=e1210]
+          - img [ref=e1211]
+        - generic [ref=e1214]:
+          - button "⚙ plans" [ref=e1215] [cursor=pointer]
+          - button "Select for merge Research Template opus Idle" [ref=e1220] [cursor=pointer]
+          - button "Select for merge Commander (Claude Code) — ive sonnet Idle" [ref=e1231] [cursor=pointer]
+          - button "Select for merge Tester (Claude Code) — ive sonnet Idle" [ref=e1242] [cursor=pointer]
+          - button "New Session" [ref=e1252] [cursor=pointer]
+      - generic [ref=e1254]:
+        - button "proj_ap Change project color" [ref=e1255] [cursor=pointer]:
+          - img [ref=e1256]
+          - img [ref=e1263]
+          - img [ref=e1265]
+          - generic [ref=e1267]: proj_ap
+          - button "Change project color" [ref=e1268]
+          - img [ref=e1269]
+        - generic [ref=e1272]:
+          - button "⚙ plans" [ref=e1273] [cursor=pointer]
+          - button "Select for merge main (branch) opus s1 Idle" [ref=e1278] [cursor=pointer]
+          - button "Select for merge main opus s1 Idle" [ref=e1290] [cursor=pointer]
+          - button "Select for merge Documentor (Claude Code) — proj_ap opus Idle" [ref=e1302] [cursor=pointer]
+          - button "New Session" [ref=e1313] [cursor=pointer]
+      - generic [ref=e1315]:
+        - button "Test Workspace Change project color" [ref=e1316] [cursor=pointer]:
+          - img [ref=e1317]
+          - img [ref=e1324]
+          - img [ref=e1326]
+          - generic [ref=e1328]: Test Workspace
+          - button "Change project color" [ref=e1329]
+          - img [ref=e1330]
+        - generic [ref=e1333]:
+          - button "⚙ plans" [ref=e1334] [cursor=pointer]
+          - button "Select for merge Test Session gemini-2.5-pro Idle" [ref=e1339] [cursor=pointer]
+          - button "New Session" [ref=e1349] [cursor=pointer]
+      - generic [ref=e1351]:
+        - button "tmp Change project color" [ref=e1352] [cursor=pointer]:
+          - img [ref=e1353]
+          - img [ref=e1360]
+          - img [ref=e1362]
+          - generic [ref=e1364]: tmp
+          - button "Change project color" [ref=e1365]
+          - img [ref=e1366]
+        - generic [ref=e1369]:
+          - button "⚙ plans" [ref=e1370] [cursor=pointer]
+          - button "Select for merge E2E Test (branch) gemini-2.5-pro k8 Idle" [ref=e1375] [cursor=pointer]
+          - button "Select for merge E2E Test gemini-2.5-pro k8 Idle" [ref=e1387] [cursor=pointer]
+          - button "Select for merge E2E Test (branch) gemini-2.5-pro f5 Idle" [ref=e1399] [cursor=pointer]
+          - button "Select for merge E2E Test gemini-2.5-pro f5 Idle" [ref=e1411] [cursor=pointer]
+          - button "Select for merge E2E Test (branch) gemini-2.5-pro l1 Idle" [ref=e1423] [cursor=pointer]
+          - button "Select for merge E2E Test gemini-2.5-pro l1 Idle" [ref=e1435] [cursor=pointer]
+          - button "Select for merge Model Test (branch) gemini-2.5-pro m6 Idle" [ref=e1447] [cursor=pointer]
+          - button "Select for merge Model Test gemini-2.5-pro m6 Idle" [ref=e1459] [cursor=pointer]
+          - button "Select for merge Claude E2E sonnet Idle" [ref=e1471] [cursor=pointer]
+          - button "Select for merge E2E Test (branch) gemini-2.5-pro a3 Idle" [ref=e1482] [cursor=pointer]
+          - button "Select for merge E2E Test gemini-2.5-pro a3 Idle" [ref=e1494] [cursor=pointer]
+          - button "Select for merge E2E Test gemini-2.5-pro Idle" [ref=e1506] [cursor=pointer]
+          - button "Select for merge E2E Test (branch) gemini-2.5-pro i7 Idle" [ref=e1517] [cursor=pointer]
+          - button "Select for merge E2E Test gemini-2.5-pro i7 Idle" [ref=e1529] [cursor=pointer]
+          - button "New Session" [ref=e1540] [cursor=pointer]
+      - generic [ref=e1542]:
+        - button "coord-test Change project color" [ref=e1543] [cursor=pointer]:
+          - img [ref=e1544]
+          - img [ref=e1551]
+          - img [ref=e1553]
+          - generic [ref=e1555]: coord-test
+          - button "Change project color" [ref=e1556]
+          - img [ref=e1557]
+        - generic [ref=e1560]:
+          - button "⚙ plans" [ref=e1561] [cursor=pointer]
+          - button "Select for merge Commander (Claude Code) — coord-test opus Idle" [ref=e1566] [cursor=pointer]
+          - button "Select for merge WorkerA sonnet frontend+1 Idle" [ref=e1577] [cursor=pointer]
+          - button "Select for merge WorkerB sonnet Idle" [ref=e1589] [cursor=pointer]
+          - button "New Session" [ref=e1599] [cursor=pointer]
+      - generic [ref=e1601]:
+        - button "TestSuite-2026 Change project color" [ref=e1602] [cursor=pointer]:
+          - img [ref=e1603]
+          - img [ref=e1610]
+          - img [ref=e1612]
+          - generic [ref=e1614]: TestSuite-2026
+          - button "Change project color" [ref=e1615]
+          - img [ref=e1616]
+        - generic [ref=e1619]:
+          - button "⚙ plans sonnet" [ref=e1620] [cursor=pointer]
+          - button "Select for merge test-sonnet-renamed sonnet Idle" [ref=e1626] [cursor=pointer]
+          - button "Select for merge test-opus-plan opus Idle" [ref=e1637] [cursor=pointer]
+          - button "Select for merge test-haiku haiku Idle" [ref=e1648] [cursor=pointer]
+          - button "Select for merge test-gemini gemini-2.5-pro Idle" [ref=e1659] [cursor=pointer]
+          - button "Select for merge test-sonnet-renamed (clone) sonnet Idle" [ref=e1670] [cursor=pointer]
+          - button "Select for merge from-template Idle" [ref=e1681] [cursor=pointer]
+          - button "Select for merge Commander (Claude Code) — TestSuite-2026 opus Idle" [ref=e1691] [cursor=pointer]
+          - button "Select for merge Tester (Claude Code) — TestSuite-2026 sonnet Idle" [ref=e1702] [cursor=pointer]
+          - button "Select for merge Documentor (Claude Code) — TestSuite-2026 sonnet Idle" [ref=e1713] [cursor=pointer]
+          - button "New Session" [ref=e1724] [cursor=pointer]
+    - generic [ref=e27]:
+      - button "Commander" [ref=e29] [cursor=pointer]:
+        - img [ref=e30]
+        - text: Commander
+      - button "Tester" [ref=e33] [cursor=pointer]:
+        - img [ref=e34]
+        - text: Tester
+      - button "Docs" [ref=e37] [cursor=pointer]:
+        - img [ref=e38]
+        - text: Docs
+    - generic [ref=e41]:
+      - button "Board" [ref=e42] [cursor=pointer]:
+        - img [ref=e43]
+        - text: Board
+      - button "Pipelines" [ref=e44] [cursor=pointer]:
+        - img [ref=e45]
+        - text: Pipelines
+      - button "Docs Hub" [ref=e52] [cursor=pointer]:
+        - img [ref=e53]
+        - text: Docs Hub
+      - button "Observe" [ref=e56] [cursor=pointer]:
+        - img [ref=e57]
+        - text: Observe
+    - generic [ref=e65]:
+      - generic [ref=e68]: connected
+      - generic [ref=e69]:
+        - generic [ref=e70]: ⌘K cmd
+        - generic [ref=e71]: ⌘N new
+        - generic [ref=e72]: ⌘W close
+        - generic [ref=e73]: ⌘1-9 tabs
+        - generic [ref=e74]: ⌘B board
+        - generic [ref=e75]: ⌘D split
+        - generic [ref=e76]: ⌘M all
+        - generic [ref=e77]: ⌘T tree
+        - generic [ref=e78]: Esc close
+  - main [ref=e79]:
+    - button "Home" [ref=e81] [cursor=pointer]:
+      - img [ref=e82]
+    - generic [ref=e86]:
+      - generic [ref=e87]:
+        - generic [ref=e88]:
+          - img [ref=e89]
+          - generic [ref=e96]
+        - generic [ref=e102]:
+          - generic [ref=e103]: Preferences
+          - generic [ref=e104]
+          - generic [ref=e110]
+          - generic [ref=e117]
+          - button "Auto-fit terminal off" [ref=e121] [cursor=pointer]
+      - generic [ref=e126]:
+        - generic [ref=e127]:
+          - generic [ref=e128]: Sessions
+          - generic [ref=e129]
+        - generic [ref=e187]:
+          - generic [ref=e188]: Help
+          - button "Keyboard Shortcuts" [ref=e190] [cursor=pointer]
+        - generic [ref=e194]:
+          - generic [ref=e195]: Config
+          - generic [ref=e196]
+        - generic [ref=e249]:
+          - generic [ref=e250]: Git
+          - button "Code Review ⌘⇧G" [ref=e252] [cursor=pointer]
+        - generic [ref=e262]:
+          - generic [ref=e263]: View
+          - generic [ref=e264]
+        - generic [ref=e308]:
+          - generic [ref=e309]: Navigation
+          - button "Quick Action Palette ⌘Y" [ref=e311] [cursor=pointer]
+        - generic [ref=e316]:
+          - generic [ref=e317]: Orchestration
+          - generic [ref=e318]
+        - generic [ref=e359]:
+          - generic [ref=e360]: Auth
+          - button "Manage Accounts" [ref=e362] [cursor=pointer]
+        - generic [ref=e367]:
+          - generic [ref=e368]: Prompts
+          - generic [ref=e369]
+        - generic [ref=e385]:
+          - generic [ref=e386]: History
+          - button "Import Claude Sessions" [ref=e388] [cursor=pointer]
+        - generic [ref=e394]:
+          - generic [ref=e395]: W2W
+          - generic [ref=e396]
+        - generic [ref=e416]:
+          - generic [ref=e417]: Search
+          - button "Search All Sessions ⌘F" [ref=e419] [cursor=pointer]
+        - generic [ref=e425]:
+          - generic [ref=e426]: Workspaces
+          - generic [ref=e427]
+        - generic [ref=e437]:
+          - generic [ref=e438]: Templates
+          - generic [ref=e439]
+        - generic [ref=e448]:
+          - generic [ref=e449]: Research
+          - generic [ref=e450]
+    - generic [ref=e467]:
+      - generic [ref=e468]:
+        - generic [ref=e471]: ok
+        - generic [ref=e1726]: 93 sessions
+      - generic [ref=e472]:
+        - generic "Drift Lynx" [ref=e1727]:
+          - generic "Drift Lynx" [ref=e1729]: D
+          - generic [ref=e1730]: 2 online
+        - button "M Mystic Fox" [ref=e474] [cursor=pointer]:
+          - generic [ref=e475]: M
+          - generic [ref=e476]: Mystic Fox
+        - generic [ref=e477]:
+          - generic [ref=e478]: ⌘K
+          - generic [ref=e479]: ⌘B
+          - generic [ref=e480]: ⌘M
+          - generic [ref=e481]: ⌘/
+          - generic [ref=e482]: ⌘1-9
+          - generic [ref=e483]: ⌘?

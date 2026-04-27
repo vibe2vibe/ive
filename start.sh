@@ -273,10 +273,48 @@ install_playwright_browser() {
     return 0
   fi
   echo "Installing Playwright Chromium (one-time, ~150MB)..."
-  if "$PYTHON_BIN" -m playwright install chromium 2>&1 | sed 's/^/  /'; then
+  if ( set -o pipefail; "$PYTHON_BIN" -m playwright install chromium 2>&1 | sed 's/^/  /' ); then
     touch "$stamp"
   else
     warn "Playwright Chromium install failed. Screenshots/preview/GIF features will prompt to install on demand."
+  fi
+}
+
+# Pre-fetch fastembed model weights (BAAI/bge-small-en-v1.5 + cross-encoder
+# reranker) so the first semantic-search/coordination call doesn't have to
+# download ~56MB of ONNX weights on demand. Names are pulled from
+# backend/embedder.py to keep a single source of truth.
+prewarm_embedding_models() {
+  local stamp="$IVE_HOME/.embeddings-installed"
+  if [ -f "$stamp" ]; then
+    return 0
+  fi
+  if ! "$PYTHON_BIN" -c 'import fastembed' >/dev/null 2>&1; then
+    # fastembed wheel not installed (user commented it out of requirements).
+    return 0
+  fi
+  echo "Pre-fetching embedding model weights (one-time, ~56MB)..."
+  if (
+    set -o pipefail
+    IVE_BACKEND_DIR="$DIR/backend" "$PYTHON_BIN" -c '
+import os, sys
+sys.path.insert(0, os.environ["IVE_BACKEND_DIR"])
+from embedder import EMBEDDING_MODEL, RERANK_MODEL
+from fastembed import TextEmbedding
+print(f"Downloading {EMBEDDING_MODEL} (~33MB) ...", flush=True)
+TextEmbedding(model_name=EMBEDDING_MODEL)
+try:
+    from fastembed.rerank.cross_encoder import TextCrossEncoder
+    print(f"Downloading {RERANK_MODEL} (~23MB) ...", flush=True)
+    TextCrossEncoder(model_name=RERANK_MODEL)
+except ImportError:
+    print("Reranker module not present in installed fastembed; skipping.")
+print("Embedding models ready.")
+' 2>&1 | sed 's/^/  /'
+  ); then
+    touch "$stamp"
+  else
+    warn "Embedding model pre-fetch failed. Models will download lazily on first use; semantic search falls back to keyword until then."
   fi
 }
 
@@ -343,6 +381,7 @@ auto_update_cli
 
 install_backend_deps
 install_playwright_browser
+prewarm_embedding_models
 
 # Install frontend deps
 if [ ! -d "$DIR/frontend/node_modules" ]; then

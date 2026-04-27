@@ -308,7 +308,6 @@ document.getElementById('lockApplyLink').addEventListener('click', (e) => {
   pinField.focus();
 });
 
-// Waitlist counter — real count from Supabase (91 base + actual signups)
 const WL_TOTAL = 120;
 let wlCurrent = 91;
 const wlCount = document.getElementById('wlCount');
@@ -338,7 +337,6 @@ async function fetchWlCount() {
   } catch {}
 }
 
-// Show 91 immediately, then update from Supabase
 setTimeout(() => renderWl(91), 300);
 fetchWlCount();
 </script>

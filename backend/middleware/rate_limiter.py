@@ -1,7 +1,7 @@
 import time
 from collections import defaultdict
 from aiohttp import web
-from config import DEFAULT_RATE_LIMIT, RATE_LIMITS
+from config import RATE_LIMITS
 
 # Store request timestamps for each client IP and endpoint
 # Structure: { "ip_address": { "endpoint_path": [timestamp1, timestamp2, ...], ... }, ... }
@@ -9,6 +9,21 @@ client_request_history = defaultdict(lambda: defaultdict(list))
 
 @web.middleware
 async def rate_limit_middleware(request, handler):
+    path = request.path
+
+    # Only act when a specific rule matches. No blanket DEFAULT applied —
+    # this keeps the middleware safe to wire in front of every route while
+    # only constraining the endpoints we explicitly want to throttle
+    # (auth-adjacent paths like invite redemption / creation).
+    matched = None
+    for endpoint_pattern, (ep_limit, ep_window) in RATE_LIMITS.items():
+        if path.startswith(endpoint_pattern):
+            matched = (ep_limit, ep_window)
+            break
+    if matched is None:
+        return await handler(request)
+    limit, window = matched
+
     # Get client IP address
     peername = request.transport.get_extra_info('peername')
     if peername is not None:
@@ -16,15 +31,6 @@ async def rate_limit_middleware(request, handler):
     else:
         # Fallback for when peername is not available (e.g., tests, specific deployments)
         ip_address = request.headers.get('X-Forwarded-For', '127.0.0.1')
-
-    path = request.path
-
-    # Determine rate limit for the current path
-    limit, window = DEFAULT_RATE_LIMIT  # Global default
-    for endpoint_pattern, (ep_limit, ep_window) in RATE_LIMITS.items():
-        if path.startswith(endpoint_pattern):
-            limit, window = ep_limit, ep_window
-            break
 
     current_time = time.time()
     # Clean up old requests outside the sliding window

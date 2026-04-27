@@ -634,6 +634,17 @@ export const api = {
     request('/api-keys', { method: 'PUT', body: JSON.stringify({ name, value }) }),
   testApiKey: (name) =>
     request('/api-keys/test', { method: 'POST', body: JSON.stringify({ name }) }),
+
+  // ── Invites (access overhaul) ───────────────────────────────────
+  // create returns the secret in three projections — exactly once. Lose it
+  // and the only recovery is revoke + recreate.
+  createInvite: (body) =>
+    request('/invite/create', { method: 'POST', body: JSON.stringify(body) }),
+  listInvites: () => request('/invites'),
+  revokeInvite: (id) =>
+    request(`/invite/${id}/revoke`, { method: 'POST' }),
+  redeemInvite: (token) =>
+    request('/invite/redeem', { method: 'POST', body: JSON.stringify({ token }) }),
 }
 
 // ── Cloudflare-tunnel-aware preview URL helper ────────────────────

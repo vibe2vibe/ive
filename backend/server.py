@@ -3,6 +3,7 @@
 import asyncio
 import codecs
 import datetime
+import hmac
 import json
 import logging
 import uuid
@@ -1837,6 +1838,41 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                             _mem_max = _mem_settings.get("memory_max_chars", 4000)
                         except Exception:
                             pass
+
+                        # Aggressive output styles also compress the memory
+                        # block (matches export_for_prompt's compact contract).
+                        # Resolve effective style here so it can drive both the
+                        # memory render and the later style-prompt injection.
+                        try:
+                            from output_styles import resolve_output_style as _resolve_style
+                            _peek_ws_style = config.get("ws_output_style")
+                            if not _peek_ws_style:
+                                try:
+                                    _peek_db = await get_db()
+                                    _peek_cur = await _peek_db.execute(
+                                        "SELECT output_style FROM workspaces WHERE id = ?",
+                                        (_ws_id_mem,))
+                                    _peek_row = await _peek_cur.fetchone()
+                                    _peek_ws_style = _peek_row["output_style"] if _peek_row else None
+                                    await _peek_db.close()
+                                except Exception:
+                                    _peek_ws_style = None
+                            _peek_global = None
+                            try:
+                                _peek_gs = await get_db()
+                                _peek_gc = await _peek_gs.execute(
+                                    "SELECT value FROM app_settings WHERE key = 'output_style'")
+                                _peek_gr = await _peek_gc.fetchone()
+                                _peek_global = _peek_gr["value"] if _peek_gr else None
+                                await _peek_gs.close()
+                            except Exception:
+                                pass
+                            effective_style = _resolve_style(
+                                config.get("output_style"), _peek_ws_style, _peek_global)
+                        except Exception:
+                            effective_style = "default"
+                        _compact_memory = effective_style in ("caveman", "ultra", "dense")
+
                         try:
                             from memory_manager import memory_manager
                             _mem_entries = await memory_manager.list_entries(workspace_id=_ws_id_mem)
@@ -1844,6 +1880,7 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                             mem_prompt = await memory_manager.export_for_prompt(
                                 workspace_id=_ws_id_mem,
                                 max_chars=_mem_max,
+                                compact=_compact_memory,
                             )
                             if mem_prompt:
                                 system_prompt_parts.append(mem_prompt)
@@ -2592,6 +2629,26 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                     rows = data.get("rows", 40)
                     if session_id:
                         pty_mgr.resize(session_id, cols, rows)
+
+                elif action == "replay_cache":
+                    # Frontend asks for the rolling output cache without
+                    # creating/restarting a PTY. Used when TerminalView
+                    # remounts onto a still-alive session (close+reopen tab,
+                    # StrictMode dev double-mount) — the new xterm starts
+                    # with an empty buffer and would otherwise stay blank
+                    # until the CLI happens to emit fresh output.
+                    session_id = data.get("session_id")
+                    if session_id and pty_mgr.is_alive(session_id):
+                        cached = pty_mgr.get_cached_output(session_id)
+                        if cached:
+                            try:
+                                await ws.send_json({
+                                    "session_id": session_id,
+                                    "type": "output",
+                                    "data": cached.decode("utf-8", errors="replace"),
+                                })
+                            except (ConnectionResetError, ConnectionError, RuntimeError):
+                                pass
 
                 elif action == "broadcast":
                     session_ids = data.get("session_ids", [])
@@ -12454,12 +12511,26 @@ def _record_auth_failure(ip: str):
 
 
 def _make_cookie_params(request: web.Request) -> dict:
-    """Cookie params with Secure flag when behind HTTPS."""
+    """Cookie params with Secure flag when behind HTTPS. SameSite=Strict
+    blocks cross-site cookie attachment, mitigating CSRF-driven token reuse
+    on this server (which grants shell access)."""
     is_https = (
         request.scheme == "https"
         or request.headers.get("X-Forwarded-Proto") == "https"
     )
-    return dict(httponly=True, samesite="Lax", max_age=86400 * 30, secure=is_https)
+    return dict(httponly=True, samesite="Strict", max_age=86400 * 30, secure=is_https)
+
+
+def _tokens_equal(a: str | None, b: str | None) -> bool:
+    """Timing-safe constant-time token comparison. Returns False if either
+    side is empty/None — guards against the empty-token bypass that would
+    succeed if AUTH_TOKEN were ever cleared."""
+    if not a or not b:
+        return False
+    try:
+        return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+    except (AttributeError, TypeError):
+        return False
 
 
 # ── Login form HTML ─────────────────────────────────────────────────��────
@@ -12511,7 +12582,7 @@ async def auth_login(request: web.Request) -> web.Response:
     data = await request.post()
     token = data.get("token", "").strip()
 
-    if token != AUTH_TOKEN:
+    if not _tokens_equal(token, AUTH_TOKEN):
         _record_auth_failure(remote_ip)
         attempts = len([t for t in _auth_failures.get(remote_ip, [])
                         if _auth_time.time() - t < _AUTH_WINDOW_SECS])
@@ -12552,6 +12623,13 @@ async def token_auth_middleware(request: web.Request, handler):
     # Auth login form endpoint — exempt (has its own rate limiting)
     if request.path == "/auth" and request.method == "POST":
         return await handler(request)
+    # Invite redemption + bare /join page — exempt (the whole point is that
+    # the redeemer doesn't have AUTH_TOKEN yet). The rate_limit middleware
+    # handles brute-force protection on /api/invite/redeem.
+    if request.path == "/api/invite/redeem" and request.method == "POST":
+        return await handler(request)
+    if request.path == "/join":
+        return await handler(request)
     if _is_rate_limited(remote_ip):
         return web.json_response(
             {"error": "Too many auth attempts. Try again later."},
@@ -12564,7 +12642,7 @@ async def token_auth_middleware(request: web.Request, handler):
         or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
     )
 
-    if token != AUTH_TOKEN:
+    if not _tokens_equal(token, AUTH_TOKEN):
         _record_auth_failure(remote_ip)
         # Browser → login form. API client → JSON 401.
         if request.headers.get("Accept", "").startswith("text/html"):
@@ -12583,6 +12661,244 @@ async def token_auth_middleware(request: web.Request, handler):
         return resp
 
     return await handler(request)
+
+
+# ─── Invite routes (PR 1 of access overhaul) ────────────────────────────
+# PR 1 stands up the invite primitive: a one-shot token redeemed for an
+# authenticated session. PR 2 will replace the global AUTH_TOKEN cookie
+# pass-through with per-row joiner_sessions; for now redemption sets the
+# existing ive_token cookie so the redeemer immediately gets in.
+
+import invites as _invites
+
+
+def _invite_to_listing(row: dict) -> dict:
+    """Strip the token_hash and return display-safe fields only."""
+    if not row:
+        return {}
+    return {
+        "id": row.get("id"),
+        "encoded_speakable": row.get("encoded_speakable"),
+        "encoded_compact": row.get("encoded_compact"),
+        "mode": row.get("mode"),
+        "brief_subscope": row.get("brief_subscope"),
+        "ttl_seconds": row.get("ttl_seconds"),
+        "label": row.get("label"),
+        "redemption_attempts": row.get("redemption_attempts"),
+        "redeemed_at": row.get("redeemed_at"),
+        "redeemed_by_session_id": row.get("redeemed_by_session_id"),
+        "burned_at": row.get("burned_at"),
+        "expires_at": row.get("expires_at"),
+        "created_at": row.get("created_at"),
+        "created_by": row.get("created_by"),
+    }
+
+
+async def create_invite_handler(request: web.Request) -> web.Response:
+    body = await request.json()
+    mode = (body.get("mode") or "").strip().lower()
+    ttl_seconds = body.get("ttl_seconds")
+    label = (body.get("label") or "").strip() or None
+    brief_subscope = body.get("brief_subscope")
+    if isinstance(brief_subscope, str):
+        brief_subscope = brief_subscope.strip().lower() or None
+
+    try:
+        ttl_seconds = int(ttl_seconds)
+    except (TypeError, ValueError):
+        return web.json_response({"error": "ttl_seconds must be an integer"}, status=400)
+
+    try:
+        created = await _invites.create_invite(
+            mode=mode,
+            ttl_seconds=ttl_seconds,
+            label=label,
+            brief_subscope=brief_subscope,
+            created_by="owner",
+        )
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+
+    await bus.emit(
+        CommanderEvent.INVITE_CREATED,
+        {
+            "invite_id": created.id,
+            "mode": created.mode,
+            "brief_subscope": created.brief_subscope,
+            "ttl_seconds": created.ttl_seconds,
+            "label": created.label,
+            "expires_at": created.expires_at,
+        },
+        source="commander",
+    )
+
+    return web.json_response({
+        "id": created.id,
+        "mode": created.mode,
+        "brief_subscope": created.brief_subscope,
+        "ttl_seconds": created.ttl_seconds,
+        "label": created.label,
+        "expires_at": created.expires_at,
+        # Three projections — the secret is returned exactly once.
+        "secret_speakable": created.encoded_speakable,
+        "secret_compact": created.encoded_compact,
+        "secret_qr": created.encoded_qr_secret,
+    })
+
+
+async def list_invites_handler(request: web.Request) -> web.Response:
+    rows = await _invites.list_invites()
+    return web.json_response({"invites": [_invite_to_listing(r) for r in rows]})
+
+
+async def revoke_invite_handler(request: web.Request) -> web.Response:
+    invite_id = request.match_info.get("id", "").strip()
+    if not invite_id:
+        return web.json_response({"error": "missing id"}, status=400)
+    burned = await _invites.revoke_invite(invite_id)
+    if burned:
+        await bus.emit(
+            CommanderEvent.INVITE_BURNED,
+            {"invite_id": invite_id, "reason": "owner_revoked"},
+            source="commander",
+        )
+    return web.json_response({"ok": True, "burned": bool(burned)})
+
+
+async def redeem_invite_handler(request: web.Request) -> web.Response:
+    """Unauthenticated. Rate-limited via middleware."""
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        body = {}
+    token_input = (body.get("token") or "").strip()
+    if not token_input:
+        return web.json_response({"error": "missing token"}, status=400)
+
+    peername = request.transport.get_extra_info("peername")
+    remote_ip = peername[0] if peername else "unknown"
+
+    try:
+        result = await _invites.redeem_invite(token_input)
+    except _invites.InviteRedeemError as e:
+        await bus.emit(
+            CommanderEvent.INVITE_REDEEM_FAILED,
+            {"reason": e.code, "remote_ip": remote_ip},
+            source="commander",
+        )
+        # Map to HTTP. invalid_token / not_found → 404; burned/redeemed/expired → 410.
+        status = 404 if e.code in ("not_found", "invalid_token") else 410
+        return web.json_response({"error": e.code, "message": str(e)}, status=status)
+
+    await bus.emit(
+        CommanderEvent.INVITE_REDEEMED,
+        {
+            "invite_id": result.invite_id,
+            "mode": result.mode,
+            "brief_subscope": result.brief_subscope,
+            "ttl_seconds": result.ttl_seconds,
+            "label": result.label,
+            "remote_ip": remote_ip,
+        },
+        source="commander",
+    )
+
+    payload = {
+        "ok": True,
+        "mode": result.mode,
+        "brief_subscope": result.brief_subscope,
+        "ttl_seconds": result.ttl_seconds,
+        "label": result.label,
+    }
+
+    resp = web.json_response(payload)
+    # PR 1 pass-through: drop the redeemer onto the existing AUTH_TOKEN
+    # cookie. PR 2 replaces this with a per-row joiner_sessions cookie.
+    if AUTH_TOKEN:
+        resp.set_cookie("ive_token", AUTH_TOKEN, **_make_cookie_params(request))
+    return resp
+
+
+_JOIN_HTML = """\
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IVE — Join</title></head>
+<body style="font-family:system-ui,-apple-system,sans-serif;background:#0a0a0a;color:#e5e5e5;
+display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:24px">
+<div style="text-align:center;width:340px">
+<h2 style="color:#22d3ee;margin:0 0 4px">IVE</h2>
+<p style="color:#666;font-size:13px;margin:0 0 24px">Paste your invite token to join</p>
+<div id="error" style="color:#f87171;font-size:13px;margin:0 0 16px;min-height:18px"></div>
+<form id="form" style="display:flex;flex-direction:column;gap:10px">
+<input id="token" name="token" placeholder="four words, 12 letters, or scanned link"
+ autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" autofocus
+ style="background:#141414;border:1px solid #2a2a2a;border-radius:8px;padding:11px 14px;
+ color:#e5e5e5;font-size:14px;outline:none;font-family:ui-monospace,SFMono-Regular,monospace;
+ transition:border-color .15s" onfocus="this.style.borderColor='#22d3ee'"
+ onblur="this.style.borderColor='#2a2a2a'" />
+<button id="submit" type="submit" style="background:#22d3ee;color:#0a0a0a;border:none;
+ border-radius:8px;padding:11px;font-size:14px;font-weight:600;cursor:pointer;
+ transition:opacity .15s">Join</button>
+</form>
+<p style="color:#333;font-size:11px;margin-top:20px">
+The owner will have given you a four-word phrase, a short code, or a scannable link.</p>
+</div>
+<script>
+(function () {
+  var form = document.getElementById('form');
+  var errEl = document.getElementById('error');
+  var tokenEl = document.getElementById('token');
+  var btn = document.getElementById('submit');
+
+  function setError(msg) { errEl.textContent = msg || ''; }
+
+  async function redeem(token) {
+    setError('');
+    btn.disabled = true; btn.textContent = 'Joining…';
+    try {
+      var r = await fetch('/api/invite/redeem', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: token }),
+        credentials: 'same-origin',
+      });
+      if (r.ok) {
+        window.location.replace('/');
+        return;
+      }
+      var data = {};
+      try { data = await r.json(); } catch (e) {}
+      var msg = data.message || data.error || ('Error ' + r.status);
+      setError(msg);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      btn.disabled = false; btn.textContent = 'Join';
+    }
+  }
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var t = (tokenEl.value || '').trim();
+    if (t) redeem(t);
+  });
+
+  // Magic-link autofill (?t=…). The token is read once and never re-read,
+  // so back-button or refresh after a failure drops to the bare paste form.
+  var params = new URLSearchParams(window.location.search);
+  var pre = params.get('t');
+  if (pre) {
+    tokenEl.value = pre;
+    history.replaceState({}, '', '/join');
+    redeem(pre);
+  }
+})();
+</script>
+</body></html>"""
+
+
+async def join_page_handler(request: web.Request) -> web.Response:
+    return web.Response(text=_JOIN_HTML, content_type="text/html")
 
 
 # ─── Cloudflare-tunnel-aware preview proxy ──────────────────────────────
@@ -14475,7 +14791,11 @@ async def get_demo_log(request: web.Request) -> web.Response:
 
 
 def create_app() -> web.Application:
-    middlewares = [cors_middleware]
+    from middleware.rate_limiter import rate_limit_middleware
+    # Order matters: CORS first (so 429s still get CORS headers), then
+    # rate-limit (so brute-force attempts at /api/invite/redeem are
+    # rejected before token auth even runs), then token auth.
+    middlewares = [cors_middleware, rate_limit_middleware]
     if AUTH_TOKEN:
         middlewares.append(token_auth_middleware)
     app = web.Application(middlewares=middlewares)
@@ -14485,6 +14805,13 @@ def create_app() -> web.Application:
     app.router.add_get("/ws", ws_handler)
     if AUTH_TOKEN:
         app.router.add_post("/auth", auth_login)
+
+    # Invite routes (access overhaul PR 1)
+    app.router.add_post("/api/invite/create", create_invite_handler)
+    app.router.add_get("/api/invites", list_invites_handler)
+    app.router.add_post("/api/invite/{id}/revoke", revoke_invite_handler)
+    app.router.add_post("/api/invite/redeem", redeem_invite_handler)
+    app.router.add_get("/join", join_page_handler)
 
     app.router.add_get("/api/workspaces", list_workspaces)
     app.router.add_post("/api/workspaces", create_workspace)

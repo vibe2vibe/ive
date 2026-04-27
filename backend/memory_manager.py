@@ -353,64 +353,58 @@ class MemoryManager:
         header = "**context**\n" if compact else "## Remembered Context\n"
         return header + "".join(lines)
 
-    # ── Sync back to Claude's native format ──────────────────────────
+    # ── Sync back to a provider's native auto-memory format ──────────
+
+    async def sync_to_provider(
+        self,
+        cli_type: str,
+        workspace_path: str,
+        workspace_id: Optional[str] = None,
+    ) -> int:
+        """Write Commander memory entries into ``cli_type``'s native dir.
+
+        Delegates to ``MemoryProvider.write_auto_memory`` so the destination
+        path matches where that CLI actually reads from (e.g. Claude Code's
+        ``~/.claude/projects/<encoded>/memory`` rather than the workspace
+        mirror). Returns the number of files written.
+        """
+        from memory_sync import get_provider
+        provider = get_provider(cli_type)
+        if not provider:
+            return 0
+        entries = await self.list_entries(workspace_id=workspace_id)
+        if not entries:
+            return 0
+        written, _ = provider.write_auto_memory(workspace_path, entries)
+        return written
+
+    async def sync_to_all_providers(
+        self,
+        workspace_path: str,
+        workspace_id: Optional[str] = None,
+    ) -> dict[str, int]:
+        """Write entries to every registered CLI's auto-memory dir.
+
+        Returns a per-CLI count of files written. CLIs that have no auto-
+        memory location simply contribute ``0``.
+        """
+        from memory_sync import all_providers
+        entries = await self.list_entries(workspace_id=workspace_id)
+        if not entries:
+            return {}
+        result: dict[str, int] = {}
+        for prov in all_providers():
+            written, _ = prov.write_auto_memory(workspace_path, entries)
+            result[prov.cli_type] = written
+        return result
 
     async def sync_to_claude_memory(
         self,
         workspace_path: str,
         workspace_id: Optional[str] = None,
     ) -> int:
-        """Write Commander memory entries to Claude's .claude/memory/ format.
-
-        Creates/updates .md files with YAML frontmatter so standalone Claude
-        Code sessions (outside Commander) also benefit from the memory.
-        """
-        entries = await self.list_entries(workspace_id=workspace_id)
-        if not entries:
-            return 0
-
-        # Find or create the memory dir
-        memory_dir = Path(workspace_path) / ".claude" / "memory"
-        memory_dir.mkdir(parents=True, exist_ok=True)
-
-        written = 0
-        index_lines = ["# Memory Index\n"]
-
-        for e in entries:
-            # Sanitize filename
-            safe_name = "".join(
-                c if c.isalnum() or c in "-_" else "_"
-                for c in e["name"]
-            ).strip("_")[:60]
-            filename = f"{e['type']}_{safe_name}.md"
-            filepath = memory_dir / filename
-
-            content = (
-                f"---\n"
-                f"name: {e['name']}\n"
-                f"description: {e['description']}\n"
-                f"type: {e['type']}\n"
-                f"---\n\n"
-                f"{e['content']}\n"
-            )
-
-            try:
-                filepath.write_text(content, encoding="utf-8")
-                written += 1
-                desc_short = e["description"][:80] if e["description"] else e["content"][:80]
-                index_lines.append(f"- [{e['name']}]({filename}) — {desc_short}")
-            except Exception as exc:
-                logger.warning("Failed to write memory file %s: %s", filepath, exc)
-
-        # Write MEMORY.md index
-        try:
-            (memory_dir / "MEMORY.md").write_text(
-                "\n".join(index_lines) + "\n", encoding="utf-8",
-            )
-        except Exception as exc:
-            logger.warning("Failed to write MEMORY.md: %s", exc)
-
-        return written
+        """Backward-compat wrapper around ``sync_to_provider('claude', ...)``."""
+        return await self.sync_to_provider("claude", workspace_path, workspace_id)
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────

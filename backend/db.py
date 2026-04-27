@@ -916,6 +916,26 @@ CREATE TABLE IF NOT EXISTS research_schedules (
     updated_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS invites (
+    id TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    encoded_speakable TEXT,
+    encoded_compact TEXT,
+    mode TEXT NOT NULL,
+    brief_subscope TEXT,
+    ttl_seconds INTEGER NOT NULL,
+    label TEXT,
+    redemption_attempts INTEGER NOT NULL DEFAULT 0,
+    redeemed_at TEXT,
+    redeemed_by_session_id TEXT,
+    burned_at TEXT,
+    expires_at TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    created_by TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_invites_hash ON invites(token_hash);
+CREATE INDEX IF NOT EXISTS idx_invites_active ON invites(redeemed_at, burned_at, expires_at);
+
 -- ─── Performance indexes for high-frequency queries ──────────────────
 CREATE INDEX IF NOT EXISTS idx_sessions_workspace
     ON sessions(workspace_id);

@@ -17,6 +17,7 @@ import urllib.parse
 
 API_URL = os.environ.get("COMMANDER_API_URL", "http://127.0.0.1:5111")
 WORKSPACE_ID = os.environ.get("COMMANDER_WORKSPACE_ID", "")
+COMMANDER_SESSION_ID = os.environ.get("COMMANDER_SESSION_ID", "")
 
 
 def api_call(method: str, path: str, body: dict | None = None) -> dict:
@@ -637,13 +638,20 @@ def tool_headsup(args: dict) -> str:
     ws_id = args.get("workspace_id", WORKSPACE_ID)
     if not message:
         return json.dumps({"ok": False, "error": "message required"})
+    # peer_messages.from_session_id has an FK to sessions(id). Use the
+    # commander's real session id when available; NULL bypasses the FK
+    # constraint so headsups still work when the MCP runs out-of-band
+    # (e.g. tests or a global commander).
     body = {
-        "from_session_id": "commander",
+        "from_session_id": COMMANDER_SESSION_ID or None,
         "content": message, "topic": topic, "priority": "heads_up",
         "blocking": False,
     }
     if to and to not in ("all",):
-        body["to"] = to
+        # post_peer_message in peer_comms encodes recipient into the topic
+        # prefix ("to:<id>|<topic>"); replicate that here so worker filters
+        # see the headsup as targeted.
+        body["topic"] = f"to:{to}|{topic}"
     result = api_call("POST", f"/workspaces/{ws_id}/peer-messages", body)
     if isinstance(result, dict) and result.get("error"):
         return json.dumps({"ok": False, **result})

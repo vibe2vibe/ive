@@ -783,14 +783,22 @@ export default function TerminalView({ sessionId }) {
     }
 
     // ── Remount onto existing PTY ──────────────────────────────────────
-    // Terminal was recreated (e.g. custom template switch) but the PTY is
-    // still running. Refit and send resize to trigger SIGWINCH so the CLI
-    // redraws its TUI at the correct dimensions.
+    // Terminal was recreated (close+reopen tab, StrictMode double-mount,
+    // grid↔single switch) but the PTY is still running. The new xterm has
+    // an empty buffer — request the rolling output cache so the user sees
+    // the current TUI state instead of blank rows. Then refit + resize to
+    // trigger SIGWINCH for any new dimensions.
     term.focus()
 
     const remountTimer = setTimeout(() => {
-      fitWithMinimum()
       const ws = useStore.getState().ws
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          action: 'replay_cache',
+          session_id: sessionId,
+        }))
+      }
+      fitWithMinimum()
       if (ws?.readyState === WebSocket.OPEN && term.cols > 0 && term.rows > 0) {
         ws.send(JSON.stringify({
           action: 'resize',

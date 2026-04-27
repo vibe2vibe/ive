@@ -157,6 +157,12 @@ class CommanderEvent(str, Enum):
     SESSION_RESTART_ATTEMPTED = "session_restart_attempted"
     SESSION_RESTART_FAILED    = "session_restart_failed"
 
+    # ── Access / invites ────────────────────────────────────────────
+    INVITE_CREATED        = "invite_created"
+    INVITE_REDEEMED       = "invite_redeemed"
+    INVITE_BURNED         = "invite_burned"
+    INVITE_REDEEM_FAILED  = "invite_redeem_failed"
+
 
 COMMANDER_EVENT_LABELS: dict[CommanderEvent, str] = {
     # Task board
@@ -261,6 +267,11 @@ COMMANDER_EVENT_LABELS: dict[CommanderEvent, str] = {
     CommanderEvent.SESSION_CRASHED:           "Session process crashed unexpectedly",
     CommanderEvent.SESSION_RESTART_ATTEMPTED: "Supervisor attempted to restart a session",
     CommanderEvent.SESSION_RESTART_FAILED:    "Supervisor failed to restart a session",
+    # Access / invites
+    CommanderEvent.INVITE_CREATED:       "Invite created",
+    CommanderEvent.INVITE_REDEEMED:      "Invite redeemed",
+    CommanderEvent.INVITE_BURNED:        "Invite revoked or auto-burned",
+    CommanderEvent.INVITE_REDEEM_FAILED: "Invite redemption attempt failed",
 }
 
 
@@ -359,6 +370,11 @@ COMMANDER_EVENT_CATEGORIES: dict[CommanderEvent, str] = {
     CommanderEvent.SESSION_CRASHED:           "session",
     CommanderEvent.SESSION_RESTART_ATTEMPTED: "session",
     CommanderEvent.SESSION_RESTART_FAILED:    "session",
+    # Access / invites
+    CommanderEvent.INVITE_CREATED:       "access",
+    CommanderEvent.INVITE_REDEEMED:      "access",
+    CommanderEvent.INVITE_BURNED:        "access",
+    CommanderEvent.INVITE_REDEEM_FAILED: "access",
 }
 
 

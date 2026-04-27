@@ -92,9 +92,16 @@ DEEP_RESEARCH_SKILL_PATH = project_root() / "plugins" / "deep-research" / "SKILL
 MCP_CONFIG_DIR = DATA_DIR / "mcp_configs"
 MCP_CONFIG_TEMPLATE = project_root() / "mcp_config_template.json" if is_frozen() else backend_dir() / "mcp_config_template.json"
 
-# Rate Limiting (disabled — local app; re-enable if exposed to network)
+# Rate Limiting — applied per (remote_ip, path). Format: path → (max_requests, window_seconds).
+# When a path matches no entry, no limit is applied (DEFAULT_RATE_LIMIT is reserved for
+# future blanket use; the rate_limiter middleware ignores it unless explicitly wired).
 DEFAULT_RATE_LIMIT = (100, 60)
-RATE_LIMITS = {}
+RATE_LIMITS = {
+    # Invite redemption: a stranger guessing tokens. Tight per-IP cap.
+    "/api/invite/redeem": (5, 60),
+    # Invite creation: owner-only, generous but capped.
+    "/api/invite/create": (30, 60),
+}
 
 # Commander
 COMMANDER_SYSTEM_PROMPT = """You are the Commander — a triage-and-route dispatcher. You do NOT plan, decompose, or write code. You accept incoming work, place a single intent ticket on the Feature Board if one doesn't exist, and route it to the correct worker (or spawn one). You then monitor and report. Decomposition is the Planner's job. Implementation is the worker's job.

@@ -132,27 +132,56 @@ class MemoryProvider:
         return Path(workspace_path) / name if name else None
 
     def auto_memory_dir(self, workspace_path: str) -> Optional[Path]:
-        """Directory for structured auto-memory entries (if the CLI has one)."""
+        """Directory the CLI currently reads structured auto-memory from.
+
+        Returns ``None`` if neither candidate exists. Read priority:
+        workspace-local first, then Claude's ``~/.claude/projects/<encoded>/
+        memory`` fallback. Use ``auto_memory_dir_for_write`` to get a
+        destination path even when no directory exists yet.
+        """
+        for path in self._auto_memory_read_candidates(workspace_path):
+            if path.exists():
+                return path
+        return None
+
+    def auto_memory_dir_for_write(self, workspace_path: str) -> Optional[Path]:
+        """Destination dir for structured-memory writeback.
+
+        Always prefers a directory that already exists (so IVE writes land
+        where the CLI actually reads). When neither candidate exists, falls
+        back to the CLI's *native* default — for Claude that's the global
+        ``~/.claude/projects/<encoded>/memory`` path (which is where Claude
+        Code itself writes auto-memory), not the workspace-local mirror.
+        """
+        existing = self.auto_memory_dir(workspace_path)
+        if existing:
+            return existing
+        defaults = self._auto_memory_native_default(workspace_path)
+        return defaults
+
+    def _auto_memory_read_candidates(self, workspace_path: str) -> list[Path]:
+        """Ordered read candidates (workspace-local before Claude global)."""
         from cli_profiles import get_profile
         profile = get_profile(self.cli_type)
-        auth = profile.auth_dir_name  # ".claude" or ".gemini"
+        auth = profile.auth_dir_name
 
-        # Local auto-memory: <workspace>/.<cli>/memory/
-        local = Path(workspace_path) / auth / "memory"
-        if local.exists():
-            return local
-
-        # Claude-specific: global projects path at ~/.claude/projects/<encoded>/memory/
-        # This is a documented exception — only Claude stores project memory
-        # outside the workspace directory.
+        candidates: list[Path] = [Path(workspace_path) / auth / "memory"]
         if self.cli_type == "claude":
             encoded = workspace_path.replace("/", "-")
             home = Path(os.path.expanduser(profile.home_dir))
-            global_dir = home / "projects" / encoded / "memory"
-            if global_dir.exists():
-                return global_dir
+            candidates.append(home / "projects" / encoded / "memory")
+        return candidates
 
-        return None
+    def _auto_memory_native_default(self, workspace_path: str) -> Optional[Path]:
+        """Where this CLI natively writes new auto-memory entries."""
+        from cli_profiles import get_profile
+        profile = get_profile(self.cli_type)
+        if self.cli_type == "claude":
+            encoded = workspace_path.replace("/", "-")
+            home = Path(os.path.expanduser(profile.home_dir))
+            return home / "projects" / encoded / "memory"
+        auth = profile.auth_dir_name
+        return Path(workspace_path) / auth / "memory" if auth else None
 
     def is_memory_path(self, file_path: str) -> bool:
         """Check whether *file_path* belongs to this provider's memory system."""
@@ -216,6 +245,66 @@ class MemoryProvider:
             except Exception as exc:
                 logger.warning("Failed to read auto-memory %s: %s", md, exc)
         return entries
+
+    def write_auto_memory(
+        self,
+        workspace_path: str,
+        entries: list[dict],
+        write_index: bool = True,
+    ) -> tuple[int, Optional[Path]]:
+        """Write structured auto-memory entries into this CLI's native dir.
+
+        Each entry is rendered as a frontmatter-headed Markdown file. When
+        ``write_index`` is true a ``MEMORY.md`` index is regenerated so the
+        CLI's UI can pick up the new files.
+
+        Returns ``(files_written, target_dir)``. Returns ``(0, None)`` when
+        the CLI has no auto-memory location.
+        """
+        target = self.auto_memory_dir_for_write(workspace_path)
+        if not target:
+            return 0, None
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            logger.warning("Failed to create auto-memory dir %s: %s", target, exc)
+            return 0, None
+
+        written = 0
+        index_lines = ["# Memory Index\n"]
+        for e in entries:
+            safe_name = "".join(
+                c if c.isalnum() or c in "-_" else "_"
+                for c in e.get("name", "")
+            ).strip("_")[:60] or "entry"
+            etype = e.get("type") or "unknown"
+            filename = f"{etype}_{safe_name}.md"
+            filepath = target / filename
+            content = (
+                f"---\n"
+                f"name: {e.get('name', safe_name)}\n"
+                f"description: {e.get('description', '')}\n"
+                f"type: {etype}\n"
+                f"---\n\n"
+                f"{e.get('content', '')}\n"
+            )
+            try:
+                filepath.write_text(content, encoding="utf-8")
+                written += 1
+                desc = (e.get("description") or e.get("content") or "")[:80]
+                index_lines.append(f"- [{e.get('name', safe_name)}]({filename}) — {desc}")
+            except Exception as exc:
+                logger.warning("Failed to write auto-memory %s: %s", filepath, exc)
+
+        if write_index:
+            try:
+                (target / "MEMORY.md").write_text(
+                    "\n".join(index_lines) + "\n", encoding="utf-8",
+                )
+            except Exception as exc:
+                logger.warning("Failed to write MEMORY.md index: %s", exc)
+
+        return written, target
 
 
 # ─── Provider registry ──────────────────────────────────────────────
@@ -511,22 +600,52 @@ class MemorySyncManager:
         total_conflicts = 0
         all_diffs: dict[str, str] = {}
 
-        for cli in changed:
-            content = states[cli]["content"]
-            prov = get_provider(cli)
-            label = (prov.memory_filename if prov else cli) or cli
-            diff = git_diff(central or "", content, "central", label)
-            if diff:
-                all_diffs[cli] = diff
+        if not central:
+            # First sync: no common ancestor exists. ``git merge-file --union``
+            # against an empty base double-counts overlapping lines (each
+            # iteration treats the prior merge AND the new content as
+            # additions vs the empty base), so a line that appears in both
+            # CLIs ends up in ``merged`` twice. Sidestep that by line-deduping
+            # the concatenation — markdown memory files are line-oriented and
+            # this preserves uniqueness without losing distinct entries.
+            seen: set[str] = set()
+            out: list[str] = []
+            for cli in changed:
+                content = states[cli]["content"] or ""
+                prov = get_provider(cli)
+                label = (prov.memory_filename if prov else cli) or cli
+                diff = git_diff("", content, "central", label)
+                if diff:
+                    all_diffs[cli] = diff
+                for line in content.splitlines():
+                    key = line.rstrip()
+                    if key and key in seen:
+                        continue
+                    if key:
+                        seen.add(key)
+                    out.append(line)
+            merged = "\n".join(out)
+            if merged and not merged.endswith("\n"):
+                merged += "\n"
+        else:
+            # Existing central → real three-way merge per provider, where
+            # ``central`` is the shared ancestor and ``merged`` accumulates
+            # each provider's edits in turn.
+            for cli in changed:
+                content = states[cli]["content"]
+                prov = get_provider(cli)
+                label = (prov.memory_filename if prov else cli) or cli
+                diff = git_diff(central, content, "central", label)
+                if diff:
+                    all_diffs[cli] = diff
 
-            use_union = not central  # first sync → union
-            result_text, _has, count = git_merge_file(
-                central or "", merged, content,
-                ours_label="merged", theirs_label=label,
-                union=use_union,
-            )
-            merged = result_text
-            total_conflicts += count
+                result_text, _has, count = git_merge_file(
+                    central, merged, content,
+                    ours_label="merged", theirs_label=label,
+                    union=False,
+                )
+                merged = result_text
+                total_conflicts += count
 
         if total_conflicts > 0:
             return SyncResult(

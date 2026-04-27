@@ -4,7 +4,7 @@ import {
   Search, Copy, Download, Layout, LayoutGrid, History, Inbox, ListChecks,
   Kanban, GitBranch, GitCompareArrows, Crown, StickyNote, User, RotateCcw, Package,
   FlaskConical, Zap, Volume2, MessageSquareQuote, ListOrdered, Server, Sparkles,
-  Brain, MessagesSquare, ExternalLink, BookOpenCheck, Key, Telescope
+  Brain, MessagesSquare, ExternalLink, BookOpenCheck, Key, Telescope, Ticket
 } from 'lucide-react'
 
 export const ACTIONS = [
@@ -53,6 +53,7 @@ export const ACTIONS = [
   { id: 'general-settings', label: 'General Settings', icon: ToggleLeft, section: 'Config' },
   { id: 'sound-settings', label: 'Sound Notifications', icon: Volume2, section: 'Config' },
   { id: 'api-keys', label: 'API Keys', icon: Key, section: 'Config' },
+  { id: 'invites', label: 'Invites — Share Access', icon: Ticket, section: 'Auth' },
   { id: 'code-review', label: 'Code Review', icon: GitCompareArrows, section: 'Git', shortcut: '⌘⇧G' },
   { id: 'annotate', label: 'Annotate Output', icon: MessageSquareQuote, section: 'Sessions', shortcut: '⌘⇧A' },
   { id: 'memory-search', label: 'Memory Search', icon: Brain, section: 'W2W' },
