@@ -10707,6 +10707,10 @@ async def evaluate_safety(request: web.Request) -> web.Response:
     _COMMANDER_BLOCKED = {
         "Edit", "Write", "MultiEdit", "NotebookEdit",
         "edit_file", "write_file", "Bash", "execute", "execute_command",
+        # Native subagent dispatch — must go through MCP create_session instead
+        # so spawned sessions are real, observable IVE workers/planners. This is
+        # the primary enforcement for Gemini Commander (no --disallowedTools).
+        "Task", "Agent", "Spawn",
     }
     if session_id and tool_name in _COMMANDER_BLOCKED:
         try:

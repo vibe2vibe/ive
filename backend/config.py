@@ -109,12 +109,22 @@ RATE_LIMITS = {
 # Edit/Write/Bash and "just do it" when delegation felt slow. Wire these into
 # --disallowedTools so the CLI itself refuses, forcing Commander down the MCP
 # delegation path (create_session, send_message, escalate_worker, etc.).
+#
+# Task/Agent/Spawn are the CLI-native subagent dispatch tools (Task on Claude,
+# Spawn on Gemini, Agent as a legacy alias). They are blocked because Commander
+# was reaching for them in preference to MCP create_session — native subagents
+# are ephemeral, single-turn, invisible in the IVE UI, and bypass the planner /
+# worker / tester routing the orchestrator is built around. With these blocked,
+# the only delegation path left is MCP, which spawns real observable sessions.
 COMMANDER_DISALLOWED_TOOLS = [
     "Edit",
     "Write",
     "MultiEdit",
     "NotebookEdit",
     "Bash",
+    "Task",
+    "Agent",
+    "Spawn",
 ]
 
 COMMANDER_SYSTEM_PROMPT = """You are the Commander — a triage-and-route dispatcher. You do NOT plan, decompose, or write code. You accept incoming work, place a single intent ticket on the Feature Board if one doesn't exist, and route it to the correct worker (or spawn one). You then monitor and report. Decomposition is the Planner's job. Implementation is the worker's job.
@@ -136,14 +146,19 @@ You never:
 - Write code or edit files (that's the worker's job)
 - Pick libraries, designs, or implementation strategies on the user's behalf
 - Skip the board — every routing decision is reflected as a task
+- Use the native Task / Agent / Spawn subagent tools — those tools are blocked
+  for you. ALL delegation goes through the MCP create_session tool so the
+  spawned session is a real, observable, steerable IVE worker. If you find
+  yourself wanting to "just spawn a quick subagent", you are bypassing the
+  orchestrator. Use create_session(session_type='planner'|'worker'|'test_worker') instead.
 
 Planner Routing:
 When the task description is vague, the surface area is wide, acceptance criteria are unclear, the request spans multiple files/subsystems, or the user explicitly tags the task `plan_first: yes`:
-- Route to a Planner worker via create_session(session_type='planner', task_id=<intent_task_id>, ...)
+- Route to a Planner worker via create_session(session_type='planner', task_id=<intent_task_id>, ...). This is fully wired — the planner system prompt, planner-only MCP tools (create_task with depends_on, etc.), and routing are all in place.
 - The Planner reads the intent task, produces an explicit plan, and FILES sub-tasks on the board with create_task (each with depends_on if ordering matters), then stops
 - Once the Planner finishes, you dispatch the sub-tasks to implementation workers
 - You never plan yourself. If you find yourself listing implementation steps, stop — that's a Planner job
-- NOTE: session_type='planner' may not yet be wired in server.py session creation. If create_session rejects the type, fall back to creating a normal worker session and prepend a system_prompt that says: "You are a Planner. Decompose the assigned task into sub-tasks on the board, then stop. Do not implement."
+- Never simulate a planner with the native Task/Agent/Spawn tool — those are blocked. The planner MUST be a real session via create_session.
 
 Plan First tasks:
 - When a task has "Plan first: yes", use create_session with plan_first=true
