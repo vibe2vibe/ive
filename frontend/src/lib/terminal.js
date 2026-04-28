@@ -170,7 +170,13 @@ export function sendForceMessage(sessionId, message) {
     sendRaw(sessionId, '\x15')
     setTimeout(() => {
       if (!getWs()) return
-      sendRaw(sessionId, message + '\r')
+      // Type and submit in separate frames for parity with the Claude
+      // path — keeps the input/submit pattern consistent across CLIs.
+      sendRaw(sessionId, message)
+      setTimeout(() => {
+        if (!getWs()) return
+        sendRaw(sessionId, '\r')
+      }, 200)
     }, 200)
   } else {
     // Claude: Standalone Escape to cancel generation, then clear + type.
@@ -185,8 +191,14 @@ export function sendForceMessage(sessionId, message) {
 
       setTimeout(() => {
         if (!getWs()) return
-        // Step 4: Type the message and submit
-        sendRaw(sessionId, message + '\r')
+        // Step 4: Type the message, then submit \r in a separate frame.
+        // Combining `message + '\r'` lets Ink's paste detection swallow
+        // the trailing CR for any message past ~80 chars.
+        sendRaw(sessionId, message)
+        setTimeout(() => {
+          if (!getWs()) return
+          sendRaw(sessionId, '\r')
+        }, 300)
       }, 300)
     }, 800)
   }
@@ -330,9 +342,12 @@ export function sendPlanFeedback(sessionId, feedback) {
   // Step 2: Select option 3 (Enter)
   setTimeout(() => {
     sendRaw(sessionId, '\r')
-    // Step 3: Wait for Claude to show the text input, then type feedback + Enter
+    // Step 3: Wait for Claude to show the text input, then type feedback.
+    // Submit \r in a separate frame so Ink's paste detection on long
+    // feedback bodies doesn't swallow the trailing CR.
     setTimeout(() => {
-      sendRaw(sessionId, feedback + '\r')
+      sendRaw(sessionId, feedback)
+      setTimeout(() => sendRaw(sessionId, '\r'), 300)
     }, 600)
   }, 150)
   clearPromptBuffer(sessionId)
@@ -376,17 +391,10 @@ export function broadcastCommand(sessionIds, command) {
     const ws2 = getWs()
     if (!ws2) return
     const isMulti = processed.includes('\n')
-    if (!isMulti) {
-      ws2.send(JSON.stringify({
-        action: 'broadcast',
-        session_ids: sessionIds,
-        data: processed + '\r',
-      }))
-      return
-    }
-    // Multi-line: split text and \r. Claude sessions need a delay so paste
-    // auto-detect releases before the submit; Gemini needs newlines collapsed
-    // because its TUI treats \n as Enter.
+    // Always split text and \r into separate frames — combining them lets
+    // Claude's Ink paste detection swallow the trailing CR on bursts above
+    // ~80 chars. Gemini needs newlines collapsed because its TUI treats \n
+    // as Enter (submits partial lines).
     if (claudeIds.length) {
       ws2.send(JSON.stringify({
         action: 'broadcast',
@@ -398,19 +406,17 @@ export function broadcastCommand(sessionIds, command) {
       ws2.send(JSON.stringify({
         action: 'broadcast',
         session_ids: geminiIds,
-        data: processed.replace(/\r?\n/g, ' ') + '\r',
+        data: isMulti ? processed.replace(/\r?\n/g, ' ') : processed,
       }))
     }
-    if (claudeIds.length) {
-      setTimeout(() => {
-        const ws3 = getWs()
-        if (!ws3) return
-        ws3.send(JSON.stringify({
-          action: 'broadcast',
-          session_ids: claudeIds,
-          data: '\r',
-        }))
-      }, 400)
-    }
+    setTimeout(() => {
+      const ws3 = getWs()
+      if (!ws3) return
+      ws3.send(JSON.stringify({
+        action: 'broadcast',
+        session_ids: sessionIds,
+        data: '\r',
+      }))
+    }, 400)
   }, 300)
 }

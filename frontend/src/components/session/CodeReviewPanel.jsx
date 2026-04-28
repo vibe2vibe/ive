@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import useStore from '../../state/store'
 import { api } from '../../lib/api'
-import { typeInTerminal } from '../../lib/terminal'
+import { sendTerminalCommand } from '../../lib/terminal'
 import { parseDiffLines } from '../../lib/diffParser'
 import { detectLang, tokenizeLine } from '../../lib/syntaxHighlight'
 
@@ -388,7 +388,11 @@ export default function CodeReviewPanel({ onClose }) {
       .replace('{diff}', diffText.slice(0, 100000))
       .replace('{annotations}', annotationsText)
 
-    typeInTerminal(sid, prompt + '\r')
+    // sendTerminalCommand wraps in bracketed-paste and submits \r as a
+    // separate frame — necessary because the diff body can be up to 100KB,
+    // which absolutely triggers Ink's paste detection (a raw text+\r blob
+    // would land in the input field and never submit).
+    sendTerminalCommand(sid, prompt)
     setSent(true)
     setTimeout(() => setSent(false), 2000)
   }

@@ -1627,7 +1627,12 @@ async def _maybe_expand_input(session_id: str, raw_input: str):
 
     async def _send_expanded():
         await _asyncio.sleep(0.3)
-        pty_mgr.write(session_id, (expanded + "\r").encode("utf-8"))
+        # Write text and submit \r in *separate* writes. A combined
+        # text+\r blob lets Claude's Ink paste-detection swallow the
+        # trailing CR for any expansion past ~80 chars.
+        pty_mgr.write(session_id, expanded.encode("utf-8"))
+        await _asyncio.sleep(0.4)
+        pty_mgr.write(session_id, b"\r")
 
     _asyncio.ensure_future(_send_expanded())
 
@@ -1678,8 +1683,11 @@ async def _replay_turns(session_id: str, turns: list[str]):
 
         await asyncio.sleep(0.3)  # Small extra pause for Ink to settle
 
-        # Type the message + Enter
-        pty_mgr.write(session_id, (turn + '\r').encode('utf-8'))
+        # Type the message, then submit Enter as a separate write — a
+        # combined blob can be paste-detected by Ink and the \r dropped.
+        pty_mgr.write(session_id, turn.encode('utf-8'))
+        await asyncio.sleep(0.4)
+        pty_mgr.write(session_id, b'\r')
 
         # Wait for response to complete (prompt reappears)
         await asyncio.sleep(2)  # Minimum wait for response to start
@@ -6470,10 +6478,19 @@ async def broadcast_input(request: web.Request) -> web.Response:
         return web.json_response({"error": "session_ids and message required"}, status=400)
 
     sent = []
+    msg_bytes = message.encode("utf-8")
     for sid in session_ids:
         if pty_mgr.is_alive(sid):
-            pty_mgr.write(sid, (message + "\r").encode("utf-8"))
+            # Split text and \r — a combined blob can be paste-detected
+            # by Ink and the trailing CR dropped, leaving the prompt
+            # typed but never submitted.
+            pty_mgr.write(sid, msg_bytes)
             sent.append(sid)
+    if sent:
+        await _asyncio.sleep(0.4)
+        for sid in sent:
+            if pty_mgr.is_alive(sid):
+                pty_mgr.write(sid, b"\r")
     if sent:
         await bus.emit(CommanderEvent.COMMANDER_BROADCAST, {
             "session_ids": sent,

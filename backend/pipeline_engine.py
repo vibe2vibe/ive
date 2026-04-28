@@ -624,10 +624,13 @@ async def _execute_agent_stage(
         return
 
     # CR (\r), not LF — raw-mode CLI TUIs interpret \r as Enter; \n leaves
-    # the prompt sitting in the buffer unsubmitted, which previously made
-    # workers appear to "finish" with no tool uses.
-    data = (prompt + "\r").encode("utf-8")
-    _pty_manager.write(session_id, data)
+    # the prompt sitting in the buffer unsubmitted. And the text + CR must
+    # go in *separate* writes — Claude's Ink TUI paste-detects bursts past
+    # ~80 chars and would absorb the trailing CR into the paste body,
+    # leaving the prompt typed but never submitted.
+    _pty_manager.write(session_id, prompt.encode("utf-8"))
+    await asyncio.sleep(0.4)
+    _pty_manager.write(session_id, b"\r")
     logger.info("Pipeline %s: sent prompt to session %s for stage '%s'",
                 run_id[:8], session_id[:8], stage.get("name"))
 
