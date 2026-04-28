@@ -89,45 +89,119 @@ Extensibility is a first-class citizen. IVE ships with a built-in marketplace of
 
 ---
 
-## 📸 Take the Tour
+## 🎬 Take the Tour
 
-A walk through what makes IVE different. Click any image for the full experience at [ive.dev](https://ive.dev).
+A walk through what makes IVE different. Each section is a feature you can use today.
 
-<p align="center">
-  <a href="https://ive.dev/#orchestration"><img src="docs/screenshots/landing/orchestration.png" alt="Orchestration — One brain. Infinite hands. Commander spawns agent armies. Pipelines wire them into workflows. RALPH iterates autonomously." width="900"></a>
-</p>
+---
 
-<p align="center">
-  <a href="https://ive.dev/#intelligence"><img src="docs/screenshots/landing/intelligence.png" alt="Intelligence — Remember. Research. Learn. Deep research across the open web. Shared memory across every agent. 8,000+ skills." width="900"></a>
-</p>
+### 🎯 Orchestration
 
-<p align="center">
-  <a href="https://ive.dev/#collaboration"><img src="docs/screenshots/landing/collaboration.png" alt="Collaboration — Multiple agents. Zero conflicts. Agents coordinate automatically. File locks prevent overwrites. Events flow through a central bus." width="900"></a>
-</p>
+<a href="https://ive.dev/#orchestration"><img src="docs/screenshots/landing/orchestration.png" alt="Orchestration banner" width="100%"></a>
 
-<p align="center">
-  <a href="https://ive.dev/#multiplayer"><img src="docs/screenshots/landing/multiplayer.png" alt="Multiplayer — Bring your team. Keep your keys. Tunneled URLs, 4-word invites, QR codes. Brief / Code / Full access modes." width="900"></a>
-</p>
+> **One brain. Infinite hands.**
 
-<p align="center">
-  <a href="https://ive.dev/#catchup"><img src="docs/screenshots/landing/catchup.png" alt="Catch-Up — Never miss anything. 2-5 sentence prose briefings on return. Activity feed, stale-session banner, mode-aware filtering." width="900"></a>
-</p>
+**Stop babysitting agents.** A meta-agent called *Commander* dispatches workers, assigns tickets, and monitors progress. Visual *Pipelines* wire them into autonomous workflows. *RALPH Mode* iterates Execute → Verify → Fix until tests pass. The *Feature Board* auto-dispatches tasks the moment a ticket hits *In Progress*.
 
-<p align="center">
-  <a href="https://ive.dev/#workflows"><img src="docs/screenshots/landing/workflows.png" alt="Workflows & Prompts — Compose once. Chain forever. Reusable prompts, cascades with variables and loops, output-style control." width="900"></a>
-</p>
+`🧠 Commander` · `🌐 Visual Pipelines` · `⚡ RALPH Loop` · `📋 Auto-Dispatch Board`
 
-<p align="center">
-  <a href="https://ive.dev/#sessions"><img src="docs/screenshots/landing/sessions.png" alt="Session Mastery — tmux wishes it could do this. Visual grid layouts, session merging, broadcast groups, multi-line composer." width="900"></a>
-</p>
+---
 
-<p align="center">
-  <a href="https://ive.dev/#devtools"><img src="docs/screenshots/landing/devtools.png" alt="Developer Tools — See everything. Annotate anything. Git diff annotations, voice-annotated screenshots, live previews, 40+ shortcuts." width="900"></a>
-</p>
+### 🧠 Intelligence
 
-<p align="center">
-  <a href="https://ive.dev/#security"><img src="docs/screenshots/landing/security.png" alt="Security — Ship fast. Stay safe. Supply chain scanning, isolated worktrees, sandboxed accounts. Security at every layer." width="900"></a>
-</p>
+<a href="https://ive.dev/#intelligence"><img src="docs/screenshots/landing/intelligence.png" alt="Intelligence banner" width="100%"></a>
+
+> **Remember. Research. Learn.**
+
+**Agents shouldn't have amnesia.** A self-hosted *Deep Research* engine fans out across DuckDuckGo, arXiv, Semantic Scholar, and GitHub — no API keys required. A hub-and-spoke *Memory* layer keeps every session in sync via three-way git merge. The built-in marketplace ships with 8,000+ skills, browsable offline.
+
+`🔬 Deep Research` · `🪢 Shared Memory` · `📚 8,000+ Skills` · `🔌 MCP Servers`
+
+---
+
+### 🤝 Collaboration
+
+<a href="https://ive.dev/#collaboration"><img src="docs/screenshots/landing/collaboration.png" alt="Collaboration banner" width="100%"></a>
+
+> **Multiple agents. Zero conflicts.**
+
+**Two agents, one repo, no chaos.** File-level coordination prevents simultaneous overwrites. A central event bus pipes every tool call, every commit, every pipeline transition through a single audit trail. Workers see each other's intent before they ever touch the same surface.
+
+`🔒 File Locks` · `📡 Event Bus` · `🧭 Auto-Coordination` · `🧾 Full Audit Trail`
+
+---
+
+### 🌐 Multiplayer
+
+<a href="https://ive.dev/#multiplayer"><img src="docs/screenshots/landing/multiplayer.png" alt="Multiplayer banner" width="100%"></a>
+
+> **Bring your team. Keep your keys.**
+
+**Hand a friend a 4-word invite.** They land in your agent army with clamped access — *Brief* (read + comment), *Code* (drive sessions, no shell), or *Full* (TTL-bounded owner). Your API keys never leave your machine. Three layers of enforcement: route guards, CLI flag injection, and PreToolUse hooks.
+
+`🎟 4-word Invites` · `📱 QR + PWA` · `🛡 Brief · Code · Full` · `🔐 Zero Key-Sharing`
+
+---
+
+### 📰 Catch-Up
+
+<a href="https://ive.dev/#catchup"><img src="docs/screenshots/landing/catchup.png" alt="Catch-Up banner" width="100%"></a>
+
+> **Never miss anything.**
+
+**Step away for an hour. Or a week.** Come back to a 2–5 sentence prose briefing of what your agents shipped, what your team committed, and what your memory hub learned — merged from the event bus, git log, and memory diffs in a single LLM call. The stale-session banner shows up automatically when you've been gone too long.
+
+`📰 Prose Briefings` · `📋 Activity Feed` · `🛎 Stale-Session Banner` · `🎯 Mode-Aware`
+
+---
+
+### 🔗 Workflows & Prompts
+
+<a href="https://ive.dev/#workflows"><img src="docs/screenshots/landing/workflows.png" alt="Workflows banner" width="100%"></a>
+
+> **Compose once. Chain forever.**
+
+**Your prompt library becomes a programming language.** Save templates with `@prompt:Name` tokens. Chain them into *cascades* with variables, loops, and auto-approval. Dial output verbosity per session with output styles. The same prompt that fixed a bug last Tuesday is one keystroke away today.
+
+`📝 Prompt Library` · `🔗 Cascades` · `🔁 Loop Support` · `📏 Output Styles`
+
+---
+
+### 🪟 Session Mastery
+
+<a href="https://ive.dev/#sessions"><img src="docs/screenshots/landing/sessions.png" alt="Sessions banner" width="100%"></a>
+
+> **tmux wishes it could do this.**
+
+**Twenty terminals, zero panic.** Visual grid layouts that remember themselves. Session merging. Broadcast keystrokes to a group. A multi-line composer with markdown structure for when you need to send something more than `yes`. Tabs stay mounted when you switch — no scroll loss, no state reset.
+
+`▦ Grid Layouts` · `🔀 Session Merge` · `📢 Broadcast Groups` · `✍ Composer`
+
+---
+
+### 🛠 Developer Tools
+
+<a href="https://ive.dev/#devtools"><img src="docs/screenshots/landing/devtools.png" alt="Developer Tools banner" width="100%"></a>
+
+> **See everything. Annotate anything.**
+
+**Code review built in.** Inline git-diff annotations. Voice-narrated browser screenshots. Live previews of your dev server. AI code review on demand. 40+ keyboard shortcuts so your hands never leave the keys.
+
+`🔍 Diff Annotations` · `🎙 Voice Notes` · `🖥 Live Previews` · `⌨ 40+ Shortcuts`
+
+---
+
+### 🛡 Security
+
+<a href="https://ive.dev/#security"><img src="docs/screenshots/landing/security.png" alt="Security banner" width="100%"></a>
+
+> **Ship fast. Stay safe.**
+
+**Defense at every layer, never bolted on.** *Anti-Vibe-Code-Pwner* scans every package install for supply-chain attacks before the agent executes it. Worktrees isolate experiments from your main checkout. Per-account sandboxes keep OAuth tokens contained. Constant-time token comparison and HttpOnly cookies on the auth path.
+
+`🛡 AVCP Scanner` · `🌳 Isolated Worktrees` · `🔐 Account Sandboxes` · `🧱 Defense-in-Depth`
+
+---
 
 ---
 
