@@ -2165,6 +2165,40 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                     except Exception as _skill_err:
                         logger.debug("Skill suggestion injection skipped: %s", _skill_err)
 
+                    # ── Auto-upgrade worker-class sessions to bypassPermissions ───
+                    # Claude Code's `auto` and `default` permission modes still
+                    # show prompts the safety gate hook can't bypass — most
+                    # notably the folder-scope grant ("Yes, and always allow
+                    # access to X/ from this project"), which is evaluated
+                    # separately from PreToolUse hooks per Anthropic's docs.
+                    # When experimental_safety_gate is on, the gate's rule set
+                    # is the actual safety net (rm -rf, DROP TABLE, package
+                    # supply-chain scans, etc.), so worker-class sessions can
+                    # safely run with `bypassPermissions` — Claude still
+                    # protects .git/.env/.claude/.mcp.json regardless. The
+                    # operator's mode choice for Commander/Tester/Documentor
+                    # is left untouched.
+                    try:
+                        if (config.get("session_type") in ("worker", "test_worker", "planner")
+                            and (config.get("permission_mode") or "").lower() in ("auto", "default")):
+                            db_sg = await get_db()
+                            try:
+                                _cur_sg = await db_sg.execute(
+                                    "SELECT value FROM app_settings WHERE key = 'experimental_safety_gate'"
+                                )
+                                _sg_row = await _cur_sg.fetchone()
+                                if _sg_row and _sg_row["value"] == "on":
+                                    config["permission_mode"] = "bypassPermissions"
+                                    logger.info(
+                                        "Worker session %s upgraded to bypassPermissions "
+                                        "(safety gate active; rules are the gate)",
+                                        session_id[:8],
+                                    )
+                            finally:
+                                await db_sg.close()
+                    except Exception as _sg_err:
+                        logger.debug("Safety-gate mode upgrade skipped: %s", _sg_err)
+
                     # ── Build CLI command via UnifiedSession ─────────────────
                     cli_type = config.get("cli_type", "claude")
                     session_obj = UnifiedSession(cli_type, config)
@@ -3085,9 +3119,34 @@ async def create_session(request: web.Request) -> web.Response:
         if body.get("auto_start", False):
             config = await get_session_config(session_id)
             if config:
+                # Mirror the worker-class bypassPermissions upgrade applied in
+                # the start_pty path (see comment there for rationale).
+                _eff_mode = permission_mode
+                try:
+                    if (session_type in ("worker", "test_worker", "planner")
+                        and (permission_mode or "").lower() in ("auto", "default")):
+                        db_sg = await get_db()
+                        try:
+                            _cur_sg = await db_sg.execute(
+                                "SELECT value FROM app_settings WHERE key = 'experimental_safety_gate'"
+                            )
+                            _sg_row = await _cur_sg.fetchone()
+                            if _sg_row and _sg_row["value"] == "on":
+                                _eff_mode = "bypassPermissions"
+                                config["permission_mode"] = "bypassPermissions"
+                                logger.info(
+                                    "Worker session %s (auto-start) upgraded to bypassPermissions "
+                                    "(safety gate active; rules are the gate)",
+                                    session_id[:8],
+                                )
+                        finally:
+                            await db_sg.close()
+                except Exception as _sg_err:
+                    logger.debug("Safety-gate mode upgrade skipped (auto-start): %s", _sg_err)
+
                 auto_sess = UnifiedSession(cli_type, {
                     "model": model,
-                    "permission_mode": permission_mode,
+                    "permission_mode": _eff_mode,
                     "effort": effort,
                 })
                 if system_prompt:
