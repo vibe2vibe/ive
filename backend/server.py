@@ -14308,7 +14308,46 @@ async def runtime_tunnel_start_handler(request: web.Request) -> web.Response:
             status=500,
         )
     _runtime_tunnel_url = url
+    # Kick off a background `npm run build` if no dist exists. Visitors
+    # will see the proxy-to-Vite path until the build lands; once dist is
+    # written, the SPA fallback transparently switches to serving it.
+    _fire_and_forget(_ensure_frontend_built())
     return web.json_response({"ok": True, "running": True, "url": url, "token": AUTH_TOKEN})
+
+
+async def _ensure_frontend_built():
+    """Run `npm run build` in frontend/ if frontend/dist/ is missing.
+    No-op if a build is already underway or dist already exists."""
+    global _frontend_build_proc
+    try:
+        from resource_path import project_root as _rp
+        dist = _rp() / "frontend" / "dist"
+        if dist.is_dir() and (dist / "index.html").is_file():
+            return
+        if _frontend_build_proc and _frontend_build_proc.returncode is None:
+            return
+        frontend_dir = _rp() / "frontend"
+        if not (frontend_dir / "package.json").is_file():
+            logger.warning("frontend/package.json missing — can't auto-build")
+            return
+        logger.info("Auto-building frontend for runtime tunnel (dist missing)")
+        _frontend_build_proc = await asyncio.create_subprocess_exec(
+            "npm", "run", "build",
+            cwd=str(frontend_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        out, _ = await _frontend_build_proc.communicate()
+        rc = _frontend_build_proc.returncode
+        if rc == 0:
+            logger.info("Frontend build complete")
+        else:
+            logger.error("Frontend build failed (rc=%s):\n%s", rc, (out or b"").decode("utf-8", "replace")[-2000:])
+    except Exception as e:
+        logger.error("Frontend auto-build error: %s", e)
+
+
+_frontend_build_proc = None
 
 
 async def runtime_tunnel_stop_handler(request: web.Request) -> web.Response:
@@ -17048,22 +17087,27 @@ def create_app() -> web.Application:
     #   - Else → 503 with a clear "build the frontend" message.
     from resource_path import project_root as _project_root
     _dist = _project_root() / "frontend" / "dist"
-    _vite_origin = "http://127.0.0.1:5173"
+    # Vite usually binds to "localhost" which on macOS resolves IPv6-first
+    # (::1) but Python/aiohttp resolves IPv4-first (127.0.0.1). Try both
+    # and cache the one that worked so we only pay the cost once.
+    _vite_origins = ("http://127.0.0.1:5173", "http://[::1]:5173")
     _NO_FRONTEND_MSG = (
-        "<!doctype html><meta charset=utf-8><title>IVE — frontend not running</title>"
+        "<!doctype html><meta charset=utf-8><title>IVE — building frontend…</title>"
         "<style>body{font-family:system-ui;max-width:36rem;margin:4rem auto;"
         "padding:1.5rem;background:#0a0a0a;color:#e4e4e7;border:1px solid #27272a;"
         "border-radius:8px}code{background:#18181b;padding:.15rem .35rem;"
         "border-radius:4px;color:#a1a1aa}h2{margin-top:0;color:#fafafa}</style>"
-        "<h2>IVE backend reachable, but no frontend</h2>"
-        "<p>Either run <code>npm run build</code> in <code>frontend/</code> to "
-        "ship the production bundle, or start <code>npm run dev</code> on "
-        "<code>:5173</code> so the backend can proxy to it.</p>"
+        "<meta http-equiv=refresh content=4>"
+        "<h2>Building the frontend bundle…</h2>"
+        "<p>This page auto-refreshes every 4s. The first build can take "
+        "10–30s; subsequent loads are instant.</p>"
+        "<p>If this persists for more than a minute, run "
+        "<code>npm run build</code> in <code>frontend/</code> manually.</p>"
     )
 
     async def _try_proxy_vite(request: web.Request, sub_path: str):
         """Reverse-proxy `request` to Vite's dev server. Returns None if Vite
-        isn't reachable so the caller can fall through to the 503 message."""
+        isn't reachable on either IPv4 or IPv6 loopback."""
         sess: aiohttp.ClientSession = request.app.get("preview_proxy_session")
         if sess is None:
             sess = aiohttp.ClientSession(
@@ -17071,9 +17115,6 @@ def create_app() -> web.Application:
                 auto_decompress=False,
             )
             request.app["preview_proxy_session"] = sess
-        upstream_url = f"{_vite_origin}/{sub_path}"
-        if request.query_string:
-            upstream_url = f"{upstream_url}?{request.query_string}"
         upstream_headers: dict[str, str] = {}
         for name, value in request.headers.items():
             lname = name.lower()
@@ -17082,30 +17123,43 @@ def create_app() -> web.Application:
             if lname.startswith("cf-"):
                 continue
             upstream_headers[name] = value
-        upstream_headers["Host"] = "127.0.0.1:5173"
-        # Vite WS (HMR) — return 501 like the preview proxy does for now.
+        upstream_headers["Host"] = "localhost:5173"
         if request.headers.get("Upgrade", "").lower() == "websocket":
             return web.json_response(
                 {"error": "vite HMR websocket proxying not yet implemented"},
                 status=501,
             )
-        try:
-            up = await sess.request(
-                request.method, upstream_url, headers=upstream_headers,
-                data=request.content if request.method not in {"GET","HEAD","OPTIONS"} else None,
-                allow_redirects=False,
-            )
-        except (aiohttp.ClientConnectorError, aiohttp.ServerDisconnectedError, asyncio.TimeoutError):
-            return None
-        resp_headers: dict[str, str] = {}
-        for name, value in up.headers.items():
-            lname = name.lower()
-            if lname in _PREVIEW_PROXY_STRIP_RESP_HEADERS:
+        # Read body once — we may retry across origins.
+        body_bytes = None
+        if request.method not in {"GET", "HEAD", "OPTIONS"}:
+            body_bytes = await request.read()
+        # Order origins by which last succeeded.
+        cached = request.app.get("vite_origin_cache")
+        origins = (cached, *(o for o in _vite_origins if o != cached)) if cached else _vite_origins
+        for origin in origins:
+            if not origin:
                 continue
-            resp_headers[name] = value
-        body = await up.read()
-        up.release()
-        return web.Response(status=up.status, headers=resp_headers, body=body)
+            upstream_url = f"{origin}/{sub_path}"
+            if request.query_string:
+                upstream_url = f"{upstream_url}?{request.query_string}"
+            try:
+                up = await sess.request(
+                    request.method, upstream_url, headers=upstream_headers,
+                    data=body_bytes, allow_redirects=False,
+                )
+            except (aiohttp.ClientConnectorError, aiohttp.ServerDisconnectedError, asyncio.TimeoutError):
+                continue
+            request.app["vite_origin_cache"] = origin
+            resp_headers: dict[str, str] = {}
+            for name, value in up.headers.items():
+                lname = name.lower()
+                if lname in _PREVIEW_PROXY_STRIP_RESP_HEADERS:
+                    continue
+                resp_headers[name] = value
+            body = await up.read()
+            up.release()
+            return web.Response(status=up.status, headers=resp_headers, body=body)
+        return None
 
     async def _serve_manifest(request: web.Request) -> web.Response:
         f = _dist / "manifest.webmanifest"
@@ -17153,19 +17207,23 @@ def create_app() -> web.Application:
             status=503, content_type="text/html", text=_NO_FRONTEND_MSG,
         )
 
-    if (_dist / "assets").is_dir():
-        app.router.add_static("/assets", _dist / "assets")
-    else:
-        # Proxy /assets/* to Vite when no dist build is present, so the
-        # frontend's <script src="/assets/...">-style imports resolve.
-        async def _assets_proxy(request: web.Request) -> web.StreamResponse:
-            path = request.match_info.get("path", "")
-            proxied = await _try_proxy_vite(request, f"assets/{path}")
-            if proxied is not None:
-                return proxied
-            return web.Response(status=404)
-        app.router.add_get("/assets/{path:.*}", _assets_proxy)
+    # /assets is served by a request-time-deciding handler so that an
+    # auto-build that lands AFTER app start automatically switches from
+    # Vite proxy to disk serving without a restart.
+    async def _assets_handler(request: web.Request) -> web.StreamResponse:
+        sub = request.match_info.get("path", "")
+        if (_dist / "assets").is_dir():
+            candidate = (_dist / "assets" / sub).resolve()
+            if candidate.is_file() and str(candidate).startswith(
+                str((_dist / "assets").resolve())
+            ):
+                return web.FileResponse(candidate)
+        proxied = await _try_proxy_vite(request, f"assets/{sub}")
+        if proxied is not None:
+            return proxied
+        return web.Response(status=404)
 
+    app.router.add_get("/assets/{path:.*}", _assets_handler)
     app.router.add_get("/manifest.webmanifest", _serve_manifest)
     app.router.add_get("/sw.js", _serve_sw)
     app.router.add_get("/{_path:.*}", _spa_fallback)
