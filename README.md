@@ -1,15 +1,6 @@
-<p align="center">
-  <img src="docs/public/logo.svg" alt="IVE Logo" width="120">
-</p>
-
-<h1 align="center">IVE (Integrated Vibecoding Environment)</h1>
-
-<h3 align="center">Vibecoding on steroids. Humanity's last IDE.</h3>
-
-<p align="center">
-  <em>One browser. N terminals. Infinite agents. Bring friends.</em><br>
-  <strong>CLI-Agnostic · Multiplayer · Visual Pipelines · 8,000+ Skills · Local-First</strong>
-</p>
+<h1 align="center">
+  <img src="docs/screenshots/landing/hero.png" alt="IVE — Integrated Vibecoding Environment. Vibecoding on steroids. Humanity's last IDE. CLI-Agnostic · Multiplayer · Visual Pipelines · 8,000+ Skills · Local-First." width="100%">
+</h1>
 
 <p align="center">
   <a href="https://github.com/michael-ra/ive/stargazers"><img src="https://img.shields.io/github/stars/michael-ra/ive?style=flat&color=f59e0b" alt="GitHub stars"></a>
