@@ -35,7 +35,10 @@
 <h2 align="center">Stop switching tabs. Start commanding agents.</h2>
 
 <p align="center">
-  <em>Run 10 Claude Code sessions at once — without losing your mind or your API budget.</em>
+  <em>Run 10 Claude Code sessions at once — without losing your mind or your API budget.</em><br>
+  <em>Bring your team. Ship <strong>50×</strong> more code in one shared environment — no agent sync drama, no memory drift, no shared keys.</em><br>
+  <em>Want the latest from the vibecoding ecosystem? One click installs it.</em><br>
+  <em>Realtime collab. The future of startup MVPs — and everything after.</em>
 </p>
 
 <p align="center">
