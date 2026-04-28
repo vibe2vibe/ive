@@ -1,6 +1,8 @@
 <p align="center">
-  <img src="marketing_material/ive-banner.png" alt="IVE" width="800">
+  <img src="docs/public/logo.svg" alt="IVE" width="72">
 </p>
+
+<h1 align="center">IVE</h1>
 
 <h3 align="center">Vibecoding on steroids. Humanity's last IDE.</h3>
 
@@ -29,25 +31,36 @@
 </p>
 
 <p align="center">
-  <a href="marketing_material/ive-promo.mp4">
-    <img src="marketing_material/multi-agent-terminals.svg" alt="Multi-agent terminals" width="240">
-  </a>
-  <a href="marketing_material/ive-promo.mp4">
-    <img src="marketing_material/agent-orchestration.svg" alt="Agent orchestration pipelines" width="240">
-  </a>
-  <a href="marketing_material/ive-promo.mp4">
-    <img src="marketing_material/feature-board-tasks.svg" alt="Feature Board" width="240">
-  </a>
+  <img src="docs/screenshots/mission-control.png" alt="Mission Control — every active session at a glance" width="900">
 </p>
-<p align="center"><sub>▲ click for the 60-second demo · more visuals in <a href="marketing_material/"><code>marketing_material/</code></a></sub></p>
+<p align="center"><sub>Mission Control · every live session across all workspaces · <kbd>⌘M</kbd></sub></p>
+
+<br>
+
+<table>
+<tr>
+<td align="center" width="33%">
+<img src="docs/screenshots/command-palette.png" alt="⌘K command palette">
+<br><sub><b>⌘K</b> — every action, searchable</sub>
+</td>
+<td align="center" width="33%">
+<img src="docs/screenshots/feature-board.png" alt="Feature Board kanban">
+<br><sub><b>Feature Board</b> — pipeline auto-dispatch on column move</sub>
+</td>
+<td align="center" width="33%">
+<img src="docs/screenshots/marketplace.png" alt="Plugins & Skills Marketplace">
+<br><sub><b>Marketplace</b> — 8000+ skills, one-click install</sub>
+</td>
+</tr>
+</table>
 
 ---
 
 ## 🔥 The pitch
 
-You open your laptop. Six terminals are already running — three Claude Code, two Gemini, one Commander orchestrating workers. A friend joins from their phone in Brief mode and triages your Feature Board. A pipeline kicks off the moment a ticket hits *In Progress*. Your Sonnet account hits its quota mid-thought and IVE silently rotates to the next plan without dropping a token. You leave for a coffee. The work doesn't stop.
+Six terminals already running. Three Claude Code, two Gemini, one Commander session managing workers. A friend jumps in from their phone and starts triaging the Feature Board. A pipeline fires the second a ticket hits *In Progress*. Sonnet runs out mid-sentence — IVE grabs the next plan and keeps going. You go get coffee. Nothing stops.
 
-That's IVE. **Open. Local. Yours. Built to ship while the rest are still tab-hunting.**
+IVE is local and open. Your CLIs, your accounts, your machine. Stack Claude Max + Gemini Ultra + API keys and IVE rotates through them when a quota empties. Invite a collaborator with a four-word passcode, clamp them to read-only or code-only, put the laptop in the bag.
 
 ## 🚀 Quick start
 
@@ -72,6 +85,10 @@ Five promises. Real receipts behind each.
 
 Three-layer abstraction (`cli_features.py` → `cli_session.py` → `cli_profiles.py`) — adding a new CLI means adding one profile. Real PTY (`os.fork()` + `pty.openpty()`) means Shift+Tab, plan mode, slash commands, interactive prompts — everything works exactly like native.
 
+<p align="center">
+  <img src="docs/screenshots/main-layout.png" alt="IVE main layout" width="780">
+</p>
+
 ### 2. Multiplayer
 > Invite collaborators with one click. Clamp them to Brief / Code / Full. No shared admin password.
 
@@ -91,6 +108,11 @@ Memory entries scoped per-workspace with auto-import on file change. `/api/catch
 > All the things you wished your terminal had — already inside.
 
 Pipelines (visual graph editor) · Feature Board Kanban · Deep Research engine · Mission Control · Code Review · Full-text search across sessions · Live Preview + screenshot annotator · Voice quick-feature drop · Per-terminal scratchpads · 30+ configurable hotkeys · RALPH execute→verify→fix loops · Output Styles for token savings · Mobile-first PWA + Web Push.
+
+<p align="center">
+  <img src="docs/screenshots/agent-tree.png" alt="Agent Tree — sub-agent hierarchy with full transcripts" width="780">
+</p>
+<p align="center"><sub>⌘T — Agent Tree: every sub-agent spawned, with model, status, and full transcript.</sub></p>
 
 ## 🎯 What changes the moment you install
 
@@ -125,7 +147,7 @@ With IVE you grab a snack at a party and keep coding from your phone — same se
 ## 👥 Who it's for
 
 - **Hackathon teams** who need to ship in 36 hours and stop stepping on each other.
-- **Solo founders** running 5 agents in parallel because that's the only way to outpace a YC-backed team.
+- **Solo founders & startup teams** — your product, engineered on autopilot, hands-on, or any blend you dial in. Multiplayer when you bring a co-builder, single-player when you want flow. Every knob configurable. Outpace teams 5× your size.
 - **Power users** who already pay for Claude Max + Gemini Ultra and want every token to count.
 - **Anyone** who looked at a closed-source AI IDE and thought *"this should be open."*
 
@@ -136,6 +158,10 @@ A handful of things IVE does that nothing else in the space does — or at least
 ### 🔭 Observatory — autonomous AI ecosystem scanner
 IVE runs a background scanner across **GitHub Trending · Product Hunt · Hacker News · Reddit · X/Twitter** on configurable intervals (12–24 h). Each source has two modes you can toggle independently — **"integrate"** (find tools/libs worth adding to *this* workspace) and **"steal"** (find features other tools have that yours should adopt). Findings are LLM-scored for relevance to your codebase and routed to a dedicated **Observatorist** session type that gives concrete recommendations: what to install, what it replaces or augments, where in the code to apply it, estimated effort. Hit ⌘⇧O for the feed. Your project gets smarter while you sleep.
 
+<p align="center">
+  <img src="docs/screenshots/deep-research.png" alt="Research DB — deep research jobs and findings" width="780">
+</p>
+
 ### 🌊 Pipelines — visual multi-agent workflows
 Drag-and-drop node-graph editor for orchestrating Commander, workers, and testers. **Agent · Condition · Delay** stages connect via `always` / `on_pass` / `on_fail` / `on_match` transitions. Triggers fire from a Feature Board column move, another pipeline completing, or manually. Variables auto-inject from the triggering task (`{task_title}`, `{task_criteria}`, `{topic}`, `{task_labels}` …). Custom `{vars}` prompt a dialog before run. Four presets ship in the box: **Research Loop · TDD Loop · Review Loop · RALPH**. The worker MCP exposes `report_pipeline_result` so stages report **structured pass/fail** instead of keyword-matching terminal output. Guards like `max_concurrent` and `cooldown_seconds` keep runaway loops in check.
 
@@ -144,6 +170,11 @@ Add-to-Home-Screen on iOS and Android (manifest + service worker shipped). **Web
 
 ### 📋 Catch-up briefings — "while you were away"
 Step away for an hour. Step back. IVE writes you a **2–5 sentence prose digest** of what happened — agent activity, git commits, memory changes — by fusing the event bus, `git log`, and the memory hub through a small LLM (Haiku by default, swap to Sonnet with a click). The `CatchUpBanner` auto-loads at the top of the app when you've been idle > 30 min. Preset ranges (1 h / 8 h / 24 h / 7 d / 30 d) or a custom datetime-local window. Mode-aware filtering for Brief joiners (they only see the events their mode lets them care about).
+
+<p align="center">
+  <img src="docs/screenshots/inbox.png" alt="Inbox — pending and idle sessions waiting on you" width="780">
+</p>
+<p align="center"><sub>⌘I — Inbox: every idle or prompting session, one click away.</sub></p>
 
 ### 🔍 Code Review — git diff next to your terminals
 A first-class diff viewer with file tree on the left, unified diff with syntax highlighting in the middle, full-text search across hunks, and inline annotation. One click to open any file in your IDE. Drives the **Review Loop** pipeline preset directly. ⌘⇧G opens it.
@@ -203,6 +234,11 @@ The 5 pillars above are the elevator pitch. Here's the inventory.
 - **Web Push** via VAPID — opt-in; LAN-HTTP installs degrade gracefully to in-app banners
 - Mobile install prompt with iOS instructions vs Android `beforeinstallprompt`
 - Full xterm fidelity in your pocket — same shortcuts, same agents, same memory
+
+<p align="center">
+  <img src="docs/screenshots/code-review.png" alt="Code Review — git diff with file tree, annotations, send to session" width="780">
+</p>
+<p align="center"><sub>⌘⇧G — Code Review: unified diff, file tree, inline annotations, send range to any session.</sub></p>
 
 ### 🛠️ Workflow & day-to-day UX
 - **Feature Board** Kanban (backlog → todo → planning → in_progress → review → done) with full event history, attachments, and an Excalidraw scratchpad per ticket

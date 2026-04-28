@@ -90,7 +90,5 @@ out/
 release/
 target/
 
-# Marketing site upload scripts (contain Supabase service-role keys)
-marketing_material/website/upload.mjs
-marketing_material/website/upload.html
-marketing_material/website/upload_to_supabase.py
+# Marketing assets (kept locally, not in repo)
+marketing_material/
