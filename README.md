@@ -31,9 +31,14 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/main-layout.png" alt="IVE — sidebar of sessions across workspaces, command grid in the middle" width="900">
+  <a href="https://app.supademo.com/demo/cmoitisch007uw80jl478lo8u">
+    <img src="docs/screenshots/main-layout.png" alt="IVE — sidebar of sessions across workspaces, command grid in the middle" width="900">
+  </a>
 </p>
-<p align="center"><sub>The IVE main layout — workspaces and sessions on the left, every action one click away.</sub></p>
+<p align="center">
+  <a href="https://app.supademo.com/demo/cmoitisch007uw80jl478lo8u"><strong>▶ Take the 9-step interactive tour</strong></a>
+  <br><sub>The IVE main layout — workspaces and sessions on the left, every action one click away.</sub>
+</p>
 
 <br>
 
