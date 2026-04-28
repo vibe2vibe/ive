@@ -70,20 +70,25 @@ Open [http://localhost:5173](http://localhost:5173). That's it. IVE handles its 
 
 <img src="docs/screenshots/landing/section-pillars.png" alt="Core Pillars" width="100%">
 
-### CLI-Agnostic
-Use **Claude Code**, **Gemini CLI**, or whatever comes next. IVE mounts real PTY terminals, meaning all native features (Shift+Tab, Plan Mode, Slash Commands) work perfectly. Swap models mid-session or switch CLIs in two keystrokes.
+<img src="docs/screenshots/landing/pillar-cli.png" alt="CLI-Agnostic — One IDE. Every CLI." width="100%">
 
-### Real-Time Multiplayer
-Bring your team into the loop. Share a session with a 4-word passcode. Granular access controls ensure collaborators have exactly the permissions they need — without sharing your API keys.
+Use **Claude Code**, **Gemini CLI**, or whatever ships next. IVE mounts real PTY terminals so every native feature (Shift+Tab, Plan Mode, Slash Commands) works exactly as the CLI intended. Swap models mid-session or switch CLIs in two keystrokes.
 
-### Shared Memory & Context
-Agents shouldn't have amnesia. IVE features a hub-and-spoke memory synchronization system. What one agent learns, every agent remembers. When you return to your desk, IVE generates a 2–5 sentence prose digest of what your agents accomplished while you were away.
+<img src="docs/screenshots/landing/pillar-multiplayer.png" alt="Real-Time Multiplayer — Bring the team. Keep the keys." width="100%">
 
-### Visual Pipelines & Orchestration
-Stop babysitting agents. Use the drag-and-drop node editor to build autonomous workflows. Trigger pipelines based on Kanban column moves, run TDD loops, or set up a RALPH (Execute → Verify → Fix) cycle that runs up to 20 iterations automatically.
+Hand a friend a 4-word passcode. They land in your agent army with clamped access — Brief, Code, or Full. Granular permissions ensure collaborators have exactly what they need; your API keys never leave your machine.
 
-### 8,000+ Skills & MCP Integration
-Extensibility is a first-class citizen. IVE ships with a built-in marketplace of over 8,000 offline-browsable skills. Easily attach Model Context Protocol (MCP) servers (like the bundled Deep Research engine) to give your agents access to databases, web search, or custom internal tools.
+<img src="docs/screenshots/landing/pillar-memory.png" alt="Shared Memory & Context — Agents that don't forget." width="100%">
+
+Hub-and-spoke memory sync. What one agent learns, every agent remembers — three-way git merge keeps every session in lockstep. Walk back to your desk to a 2–5 sentence prose digest of what your agents accomplished while you were away.
+
+<img src="docs/screenshots/landing/pillar-pipelines.png" alt="Visual Pipelines & Orchestration — Wire agents like circuits." width="100%">
+
+Stop babysitting agents. Use the drag-and-drop node editor to build autonomous workflows. Trigger pipelines from Kanban column moves, run TDD loops, or set up a RALPH (Execute → Verify → Fix) cycle that runs up to 20 iterations automatically.
+
+<img src="docs/screenshots/landing/pillar-skills.png" alt="8,000+ Skills & MCP Integration — Your agents, supercharged." width="100%">
+
+Extensibility is a first-class citizen. IVE ships with a built-in marketplace of 8,000+ offline-browsable skills. Attach Model Context Protocol (MCP) servers (databases, web search, the bundled Deep Research engine, your internal tools) in one click.
 
 ---
 
