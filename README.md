@@ -23,7 +23,7 @@
 
 ---
 
-<img src="docs/screenshots/landing/section-pitch.png" alt="The Pitch" width="100%">
+<img src="docs/screenshots/landing/section-pitch.png" alt="Why IVE" width="100%">
 
 Six terminals running. Three Claude Code, two Gemini, one Commander session managing workers. A friend jumps in from their phone and starts triaging the Feature Board. A pipeline fires the second a ticket hits *In Progress*. Sonnet runs out of tokens mid-sentence — IVE rotates to your next API key and keeps going. You go get coffee. **Nothing stops.**
 
