@@ -180,8 +180,9 @@ export default function CommandPalette({ onClose, onAction }) {
       case 'start-documentor': {
         const wsId = store.activeWorkspaceId || store.workspaces[0]?.id
         if (wsId) {
-          api.startDocumentor(wsId).then((s) => {
+          api.startDocumentor(wsId).then(async (s) => {
             store.addSession(s)
+            await store.ensureSessionRunning(s.id)
             setTimeout(() => {
               sendTerminalCommand(s.id, 'Begin documenting this project now. Start with get_knowledge_base() to understand the product, then scaffold_docs() and systematically document each feature with screenshots and GIF demos. Build the site when done.')
             }, 3000)

@@ -719,6 +719,26 @@ const useStore = create((set, get) => ({
     )
   },
 
+  // Ensure a session's PTY is alive before sending input. Used by Execute,
+  // tester invocation, and pipeline run startup paths where the row may
+  // exist in DB but the PTY has been stopped (status='exited') or never
+  // started in this client session (not in startedSessions).
+  // Resolves once a start_pty has been sent and the Ink TUI has had a
+  // chance to render its first frame.
+  ensureSessionRunning: async (sessionId) => {
+    if (!sessionId) return false
+    const state = get()
+    const sess = state.sessions[sessionId]
+    if (!sess) return false
+    const alreadyAlive = sess.status !== 'exited' && startedSessions.has(sessionId)
+    if (alreadyAlive) return true
+    state.restartSession(sessionId)
+    // Give the PTY a beat to spawn before the first paste lands —
+    // dispatching too early can race the Ink TUI's first render.
+    await new Promise((r) => setTimeout(r, 1500))
+    return true
+  },
+
   restartAllSessions: () => {
     const { ws, sessions } = get()
     if (!ws || ws.readyState !== WebSocket.OPEN) return

@@ -1656,6 +1656,8 @@ export default function Sidebar({ onWorkspaceCreated } = {}) {
                         const s = await api.startDocumentor(wsId, { cli_type: opt.cli, model: opt.model, allow_all_edits: docAllowAllEdits })
                         useStore.getState().setActiveWorkspace(s.workspace_id)
                         useStore.getState().addSession(s)
+                        // startDocumentor is idempotent — wake any dead PTY first.
+                        await useStore.getState().ensureSessionRunning(s.id)
                         // Auto-send kickoff prompt after PTY boots
                         setTimeout(() => {
                           sendTerminalCommand(s.id, 'Begin documenting this project now. Start with get_knowledge_base() to understand the product, then scaffold_docs() and systematically document each feature with screenshots and GIF demos. Build the site when done.')

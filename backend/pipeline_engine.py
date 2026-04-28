@@ -1670,6 +1670,50 @@ PRESETS = {
         ],
         "triggers": [],
     },
+    "auto-dispatch": {
+        "name": "Auto-Dispatch",
+        "description": (
+            "When a task enters Todo, automatically route it to Commander to spawn a worker "
+            "and begin implementation. Enable the board_column trigger to make todo tasks "
+            "self-dispatching. Commander checks current in_progress load before acting."
+        ),
+        "stages": [
+            {
+                "id": "dispatch",
+                "name": "Dispatch to Worker",
+                "type": "agent",
+                "session_type": "commander",
+                "prompt_template": (
+                    "A task just entered the Todo queue and needs a worker:\n\n"
+                    "Title: {task_title}\n"
+                    "Task ID: {task_id}\n"
+                    "Priority: {task_priority}\n"
+                    "Description: {task_description}\n"
+                    "Acceptance criteria: {task_criteria}\n\n"
+                    "Steps:\n"
+                    "1. Call list_tasks(status_filter='in_progress') to check current workload.\n"
+                    "2. If the task is already in_progress (another agent claimed it), stop — do nothing.\n"
+                    "3. If you have capacity under your max_workers limit, call "
+                    "create_session(task_id='{task_id}') to spawn a worker. "
+                    "The worker will automatically mark the task in_progress and update status when done.\n"
+                    "4. If at max capacity, call update_task(task_id='{task_id}', status='backlog', "
+                    "result_summary='Queue full — requeued to backlog') to hold it until a slot opens."
+                ),
+                "position": {"x": 300, "y": 200},
+                "config": {"icon": "send"},
+                "agent_config": {"model": "opus", "permission_mode": "auto", "effort": "high"},
+            }
+        ],
+        "transitions": [],
+        "triggers": [
+            {
+                "type": "board_column",
+                "config": {"column": "todo"},
+                "guards": {"max_concurrent": 10, "cooldown_seconds": 2},
+                "enabled": True,
+            }
+        ],
+    },
 }
 
 

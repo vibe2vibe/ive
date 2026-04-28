@@ -115,9 +115,12 @@ export default function DocsPanel({ onClose }) {
     }
   }
 
-  const handleSendPrompt = (prompt, actionName) => {
+  const handleSendPrompt = async (prompt, actionName) => {
     if (!documentorSession?.id) return
     setSending(actionName)
+    // Wake the documentor PTY if it was stopped — otherwise the input
+    // would be sent into a dead session and silently dropped.
+    await useStore.getState().ensureSessionRunning(documentorSession.id)
     sendTerminalCommand(documentorSession.id, prompt)
     // Switch to the documentor tab
     useStore.getState().setActiveSession(documentorSession.id)

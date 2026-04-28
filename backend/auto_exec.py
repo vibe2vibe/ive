@@ -152,9 +152,26 @@ async def _do_dispatch(workspace_id: str, specific_task_id: str = None):
             return
         commander_id = commander["id"]
 
-        # 3. Verify Commander PTY is alive
-        if not _pty_mgr or not _pty_mgr.is_alive(commander_id):
+        # 3. Verify Commander PTY is alive — auto-revive if dead so a stopped
+        # commander doesn't silently swallow board-triggered dispatches.
+        if not _pty_mgr:
             return
+        if not _pty_mgr.is_alive(commander_id):
+            try:
+                from session_supervisor import restart as _supervisor_restart
+                logger.info("Auto-exec: commander PTY %s dead, reviving", commander_id)
+                result = await _supervisor_restart(commander_id)
+                if not result.get("ok"):
+                    logger.warning("Auto-exec: failed to revive commander %s: %s",
+                                   commander_id, result.get("error"))
+                    return
+                # Give the Ink TUI a beat to render before paste lands.
+                await asyncio.sleep(1.5)
+            except Exception:
+                logger.exception("Auto-exec: commander revive raised; bailing")
+                return
+            if not _pty_mgr.is_alive(commander_id):
+                return
 
         # 4. Count active workers (sessions with in_progress/planning tasks)
         cur = await db.execute(

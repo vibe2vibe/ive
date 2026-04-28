@@ -574,9 +574,16 @@ export default function FeatureBoard({ onClose }) {
           task={selectedTask}
           workspaceId={selectedTask.workspace_id || effectiveWsId}
           commanderSessionId={
-            Object.values(useStore.getState().sessions).find(
-              (s) => s.workspace_id === (selectedTask.workspace_id || effectiveWsId) && s.session_type === 'commander'
-            )?.id
+            // Prefer a live commander; fall back to any commander row so
+            // ensureSessionRunning() in handleExecute can revive a dead PTY.
+            (() => {
+              const sessions = Object.values(useStore.getState().sessions)
+              const wsId = selectedTask.workspace_id || effectiveWsId
+              const matches = sessions.filter(
+                (s) => s.workspace_id === wsId && s.session_type === 'commander'
+              )
+              return (matches.find((s) => s.status !== 'exited') || matches[0])?.id
+            })()
           }
           onClose={() => setSelectedTask(null)}
           onSave={handleTaskSave}

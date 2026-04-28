@@ -338,6 +338,10 @@ export default function TaskDetailModal({ task, workspaceId, commanderSessionId,
         alert('Failed to start Commander.')
         return
       }
+    } else {
+      // Commander row exists but the PTY may be dead (status='exited' from
+      // a prior /stop or browser refresh). Bring it back up before paste.
+      await useStore.getState().ensureSessionRunning(targetCommanderId)
     }
     // Extract diagram text notes
     const diagramNotes = extractDiagramNotes(diagramData)
@@ -433,11 +437,14 @@ export default function TaskDetailModal({ task, workspaceId, commanderSessionId,
           <button
             onClick={async () => {
               try {
-                // Ensure commander exists
+                // Ensure commander row exists
                 const commander = await api.startCommander(workspaceId)
                 if (commander?.id) {
                   // Switch to commander tab
                   useStore.getState().setActiveSession(commander.id)
+                  // Make sure the PTY is actually alive before paste —
+                  // startCommander is idempotent and won't respawn a dead PTY.
+                  await useStore.getState().ensureSessionRunning(commander.id)
                   // Send refine prompt
                   const refinePrompt = `I want to refine ticket #${task.id.slice(0, 8)} "${task.title}". Here are the current details:\n\nDescription: ${task.description || '(none)'}\nAcceptance Criteria: ${task.acceptance_criteria || '(none)'}\nStatus: ${task.status}\nLabels: ${task.labels || '(none)'}\n\nHelp me improve this ticket. Listen to what I say and help me refine the description, acceptance criteria, and implementation approach. Use update_task to apply changes when we agree.`
                   sendTerminalCommand(commander.id, refinePrompt)
