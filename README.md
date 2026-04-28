@@ -12,7 +12,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/vibe2vibe/ive/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
+  <a href="https://github.com/michael-ra/ive/stargazers"><img src="https://img.shields.io/github/stars/michael-ra/ive?style=flat&label=GitHub%20stars&color=f59e0b" alt="GitHub stars"></a>
+  <a href="https://github.com/michael-ra/ive/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
   <img src="https://img.shields.io/badge/python-3.11%2B-blue.svg" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/node-18%2B-green.svg" alt="Node 18+">
   <img src="https://img.shields.io/badge/status-alpha-orange.svg" alt="Status: Alpha">
@@ -21,6 +22,7 @@
 </p>
 
 <p align="center">
+  <a href="https://ive.dev"><strong>🌐 ive.dev</strong></a> ·
   <a href="#-quick-start"><strong>Quick start</strong></a> ·
   <a href="#-what-you-get"><strong>5 pillars</strong></a> ·
   <a href="#-marquee-features"><strong>Marquee</strong></a> ·
@@ -30,10 +32,18 @@
   <a href="#%EF%B8%8F-this-is-alpha"><strong>Roadmap</strong></a>
 </p>
 
+<h2 align="center">Stop switching tabs. Start commanding agents.</h2>
+
 <p align="center">
-  <img src="docs/screenshots/main-layout.png" alt="IVE — sidebar of sessions across workspaces, command grid in the middle" width="900">
+  <em>Run 10 Claude Code sessions at once — without losing your mind or your API budget.</em>
 </p>
-<p align="center"><sub>The IVE main layout — workspaces and sessions on the left, every action one click away.</sub></p>
+
+<p align="center">
+  <a href="https://ive.dev">
+    <img src="docs/screenshots/main-layout.png" alt="IVE — sidebar of sessions across workspaces, command grid in the middle" width="900">
+  </a>
+</p>
+<p align="center"><sub>The IVE main layout — workspaces and sessions on the left, every action one click away. <a href="https://ive.dev"><b>See it on ive.dev →</b></a></sub></p>
 
 <br>
 
@@ -53,6 +63,10 @@
 </td>
 </tr>
 </table>
+
+<p align="center">
+  <strong>140+</strong> API routes&nbsp;·&nbsp;<strong>40+</strong> shortcuts&nbsp;·&nbsp;<strong>35+</strong> MCP tools&nbsp;·&nbsp;<strong>8,000+</strong> skills&nbsp;·&nbsp;<strong>Zero</strong> cloud dependencies
+</p>
 
 ---
 
@@ -83,7 +97,7 @@ Five promises. Real receipts behind each.
 ### 1. CLI-agnostic
 > Claude Code, Gemini CLI, anything that ships next. One UI, one mental model.
 
-Three-layer abstraction (`cli_features.py` → `cli_session.py` → `cli_profiles.py`) — adding a new CLI means adding one profile. Real PTY (`os.fork()` + `pty.openpty()`) means Shift+Tab, plan mode, slash commands, interactive prompts — everything works exactly like native.
+Real PTY terminals — Shift+Tab, plan mode, slash commands, interactive prompts all work exactly like native. Switch CLI mid-session, swap models with resume, spin up a new one in two keystrokes. Haiku, Sonnet, Opus, Gemini Pro and Flash all unified. Adding a new CLI is a one-file profile drop.
 
 <p align="center">
   <img src="docs/screenshots/mission-control.png" alt="Mission Control — every active session at a glance" width="780">
@@ -91,24 +105,24 @@ Three-layer abstraction (`cli_features.py` → `cli_session.py` → `cli_profile
 <p align="center"><sub>Mission Control (⌘M) — every live session across all workspaces in one grid.</sub></p>
 
 ### 2. Multiplayer
-> Invite collaborators with one click. Clamp them to Brief / Code / Full. No shared admin password.
+> Bring your team. Keep your keys. No shared admin password.
 
-One-shot invites with EFF-wordlist or QR. Per-row joiner sessions with sliding TTL. Three modes enforced at route, CLI-flag, and hook layer. PWA + Web Push so a teammate can triage from the couch.
+Hand a friend a 4-word passcode (or a QR) and they're in. Clamp them to **Brief / Code / Full** — read-only, coding-only, or owner-equivalent — enforced three layers deep so a curious joiner can't escape. Sliding session TTLs, one-click revoke, mode pill in the sidebar. Their keystrokes show up next to yours in real time.
 
 ### 3. Skills + extensible
-> Plugins, MCP servers, guidelines, output styles, skills — attach per session, swap on the fly.
+> Plugins, MCP, guidelines, output styles, skills — all live, all swappable mid-flight.
 
-Plugin Marketplace with registry sync. 8000+ skill catalog baked in. MCP servers for Commander, Worker, and Documentor. `@prompt:` / `@research:` / `@ralph` token expansion inline.
+The Marketplace ships with **8,000+ skills** browsable offline. Bring any plugin from the Claude or Gemini ecosystems — IVE auto-detects, translates, and exports back. Three first-party MCP servers (Commander, Worker, Documentor) wire your agents into the app itself. Type `@prompt:` / `@research:` / `@ralph` and watch the token expand inline.
 
 ### 4. Memory + intelligence built in
 > Hub-and-spoke sync, three-way merge, briefings, an LLM router that uses *your* CLI subscription — no API keys.
 
-Memory entries scoped per-workspace with auto-import on file change. `/api/catchup` builds a 2-5 sentence prose briefing from event bus + git log + memory hub. Stale-session banner auto-loads if you've been gone >30 min.
+Memory entries scoped per-workspace, auto-imported the moment your CLI writes them. Step away for an hour, come back — IVE has written you a 2–5 sentence prose digest of what happened by fusing the event bus, git log, and memory hub. What one agent learns, every agent remembers. Stale-session banner auto-loads at the top of the app when you've been gone > 30 min.
 
 ### 5. Quality-of-life everywhere
-> All the things you wished your terminal had — already inside.
+> Everything you wished your terminal had — already inside.
 
-Pipelines (visual graph editor) · Feature Board Kanban · Deep Research engine · Mission Control · Code Review · Full-text search across sessions · Live Preview + screenshot annotator · Voice quick-feature drop · Per-terminal scratchpads · 30+ configurable hotkeys · RALPH execute→verify→fix loops · Output Styles for token savings · Mobile-first PWA + Web Push.
+Visual pipeline editor · Feature Board Kanban · Deep Research engine · Mission Control · Code Review · Full-text search across sessions · Live Preview + screenshot annotator · Voice quick-feature drop · Per-terminal scratchpads · 40+ rebindable hotkeys · RALPH execute → verify → fix loops · Token-saving output styles · Mobile-first PWA + Web Push.
 
 <p align="center">
   <img src="docs/screenshots/agent-tree.png" alt="Agent Tree — sub-agent hierarchy with full transcripts" width="780">
@@ -156,32 +170,32 @@ With IVE you grab a snack at a party and keep coding from your phone — same se
 
 A handful of things IVE does that nothing else in the space does — or at least not all in one place.
 
-### 🔭 Observatory — autonomous AI ecosystem scanner
-IVE runs a background scanner across **GitHub Trending · Product Hunt · Hacker News · Reddit · X/Twitter** on configurable intervals (12–24 h). Each source has two modes you can toggle independently — **"integrate"** (find tools/libs worth adding to *this* workspace) and **"steal"** (find features other tools have that yours should adopt). Findings are LLM-scored for relevance to your codebase and routed to a dedicated **Observatorist** session type that gives concrete recommendations: what to install, what it replaces or augments, where in the code to apply it, estimated effort. Hit ⌘⇧O for the feed. Your project gets smarter while you sleep.
+### 🔭 Observatory — your project gets smarter while you sleep
+A background scanner sweeps **GitHub Trending · Product Hunt · Hacker News · Reddit · X** on a schedule. Two modes per source: **"integrate"** finds tools and libraries worth adding to *this* codebase; **"steal"** finds features competitors shipped that yours should adopt. Every finding gets LLM-scored against your project, then handed to a dedicated **Observatorist** session that tells you exactly what to install, what it replaces, where to put it, and how long it'll take. Hit ⌘⇧O for the feed. Your roadmap, on autopilot.
 
 <p align="center">
   <img src="docs/screenshots/deep-research.png" alt="Research DB — deep research jobs and findings" width="780">
 </p>
 
-### 🌊 Pipelines — visual multi-agent workflows
-Drag-and-drop node-graph editor for orchestrating Commander, workers, and testers. **Agent · Condition · Delay** stages connect via `always` / `on_pass` / `on_fail` / `on_match` transitions. Triggers fire from a Feature Board column move, another pipeline completing, or manually. Variables auto-inject from the triggering task (`{task_title}`, `{task_criteria}`, `{topic}`, `{task_labels}` …). Custom `{vars}` prompt a dialog before run. Four presets ship in the box: **Research Loop · TDD Loop · Review Loop · RALPH**. The worker MCP exposes `report_pipeline_result` so stages report **structured pass/fail** instead of keyword-matching terminal output. Guards like `max_concurrent` and `cooldown_seconds` keep runaway loops in check.
+### 🌊 Pipelines — drag-and-drop multi-agent workflows
+A node-graph editor for orchestrating Commander, workers, and testers. **Agent · Condition · Delay** stages connect with `always` / `on_pass` / `on_fail` / `on_match` edges. Triggers fire on Feature Board column moves, on another pipeline finishing, or manually. Task variables auto-inject (`{task_title}`, `{task_criteria}`, `{topic}` …); custom variables prompt a dialog before run. Four presets ship in the box: **Research Loop · TDD Loop · Review Loop · RALPH**. Stages report **structured pass/fail** — no flaky keyword scraping. Concurrency caps and cooldowns keep runaway loops in their cage.
 
 ### 📱 Mobile + PWA — code from the couch
-Add-to-Home-Screen on iOS and Android (manifest + service worker shipped). **Web Push** via VAPID for off-screen alerts when an agent stalls or a pipeline finishes. Network-first for `/api/*` (never cached), cache-first for the app shell. Pair with `npx ive --tunnel` (Cloudflare-tunnel mode) and you've got a full xterm in your pocket — same sessions, same agents, same memory. Snack break, party run, train ride — context never breaks.
+Add-to-Home-Screen on iOS and Android. **Web Push** for off-screen alerts when an agent stalls or a pipeline finishes. Pair with `npx ive --tunnel` and you've got a full xterm in your pocket — same sessions, same agents, same memory. Snack run, train ride, line for coffee — your flow doesn't break because your laptop closed.
 
 ### 📋 Catch-up briefings — "while you were away"
-Step away for an hour. Step back. IVE writes you a **2–5 sentence prose digest** of what happened — agent activity, git commits, memory changes — by fusing the event bus, `git log`, and the memory hub through a small LLM (Haiku by default, swap to Sonnet with a click). The `CatchUpBanner` auto-loads at the top of the app when you've been idle > 30 min. Preset ranges (1 h / 8 h / 24 h / 7 d / 30 d) or a custom datetime-local window. Mode-aware filtering for Brief joiners (they only see the events their mode lets them care about).
+Step away for an hour. Step back. IVE writes you a **2–5 sentence prose digest** of what happened — agent activity, commits, memory changes — fused from the event bus, your git log, and the memory hub through a small LLM (Haiku by default, swap to Sonnet with a click). A banner auto-loads at the top of the app when you've been idle > 30 min. Pick from preset ranges (1 h / 8 h / 24 h / 7 d / 30 d) or a custom window. Joiners only see what their mode entitles them to.
 
 <p align="center">
   <img src="docs/screenshots/inbox.png" alt="Inbox — pending and idle sessions waiting on you" width="780">
 </p>
 <p align="center"><sub>⌘I — Inbox: every idle or prompting session, one click away.</sub></p>
 
-### 🔍 Code Review — git diff next to your terminals
-A first-class diff viewer with file tree on the left, unified diff with syntax highlighting in the middle, full-text search across hunks, and inline annotation. One click to open any file in your IDE. Drives the **Review Loop** pipeline preset directly. ⌘⇧G opens it.
+### 🔍 Code Review — diffs next to your terminals
+A first-class diff viewer: file tree on the left, syntax-highlighted unified diff in the middle, full-text search across hunks, inline annotation. One click opens any file in your IDE. Drives the **Review Loop** pipeline preset directly. ⌘⇧G to open.
 
-### 📓 Scratchpads — three layers, all auto-persisted
-**Global** ⌘J scratchpad for free-floating notes. **Per-session** scratchpad that travels with each terminal — your context for that agent stays attached to that agent. **Per-task Excalidraw** drawing surface inside every Feature Board ticket so you can sketch architecture next to the description. Plus a **Quick Feature drop** modal (⌘⇧N) with optional voice input — speak a feature into existence while your hands are full of agents.
+### 📓 Scratchpads — three layers, all auto-saved
+**⌘J** for a global pad. **Per-session** pad attached to each terminal — context for that agent stays with that agent. **Per-task Excalidraw** drawing surface inside every Feature Board ticket — sketch architecture next to the description. Plus a **Quick Feature drop** (⌘⇧N) with voice input — speak a feature into existence while your hands are full of agents.
 
 ## 🎒 The full toolkit
 
@@ -199,41 +213,41 @@ The 5 pillars above are the elevator pitch. Here's the inventory.
 - Mission Control dashboard · Inbox of idle/pending sessions · Sub-agent tree with full transcripts
 
 ### 🤖 Agent orchestration
-- **Commander** (opus / plan / high) — orchestrates worker sessions over MCP
-- **Tester** — verifies via the worker MCP's structured `report_pipeline_result`
-- **Documentor** — Playwright screenshots + ffmpeg GIFs + auto-built **VitePress docs site**
-- **Worker MCP** — scoped session tools (read/update own tasks, transitions)
-- **RALPH** — execute → verify → fix loop, up to 20 iterations, with task-aware exit
-- **Pipelines** — visual node-graph editor; Agent / Condition / Delay stages; `always` / `on_pass` / `on_fail` / `on_match` transitions; triggers on `board_column` / `pipeline_complete` / `manual`; guards for `max_concurrent` + `cooldown_seconds`
+- **Commander** — orchestrates worker sessions through MCP, runs on Opus + plan mode by default
+- **Tester** — verifies work via structured pass/fail reporting (no flaky output scraping)
+- **Documentor** — auto-builds a docs site for your project: Playwright screenshots, ffmpeg GIFs, VitePress output
+- **Worker MCP** — each worker gets scoped tools to read/update its own tasks
+- **RALPH** — execute → verify → fix loop, up to 20 iterations, exits when the task says it's done
+- **Pipelines** — visual node-graph editor; Agent / Condition / Delay stages; conditional transitions; triggers on board moves, pipeline completions, or manually; concurrency caps + cooldowns
 - 4 built-in presets: **Research Loop · TDD Loop · Review Loop · RALPH**
-- Auto-injected pipeline variables (`{task_title}`, `{topic}`, `{task_criteria}`, …); custom `{vars}` prompt a dialog
-- Auto-exec from Feature Board column moves (yields to active pipelines)
-- Multi-agent conflict detection via **myelin coordination** (experimental flag)
+- Task variables auto-inject; custom variables prompt a dialog
+- Auto-exec dispatches from Feature Board column moves (and yields to active pipelines)
+- Multi-agent conflict detection via **myelin coordination** (experimental)
 
 ### 🧠 Knowledge, memory & research
-- **Hub-and-spoke memory sync** with three-way `git merge-file` conflict resolution
-- Workspace-scoped memory entries; globals stay global; auto-import on file change with live WS refresh
-- Memory taxonomy: **user / feedback / project / reference**
-- **Catch-up briefings** (`/api/catchup`) — event bus + git log + memory hub fused into a 2–5 sentence prose digest; Haiku or Sonnet, your pick
+- **Hub-and-spoke memory sync** with three-way merge conflict resolution
+- Memory entries scoped per-workspace; globals stay global; auto-import the moment your CLI writes them, with live refresh
+- Four memory types: **user / feedback / project / reference**
+- **Catch-up briefings** — event bus + git log + memory hub fused into a 2–5 sentence prose digest; Haiku or Sonnet, your pick
 - Stale-session banner auto-loads when you've been gone > 30 min
 - **Observatory** — autonomous scanner over GitHub Trending · Product Hunt · Hacker News · Reddit · X; "integrate" vs "steal" modes; LLM relevance scoring; dedicated Observatorist session type
-- **Self-hosted Deep Research engine** — multi-backend (Brave · SearXNG · DuckDuckGo · arXiv · Semantic Scholar · GitHub), RRF-fused ranking, iterative gap analysis, hybrid mode (Claude/Gemini brain + local hands), human-in-loop via `steer.md`
-- **Deep Research plugin** with 6 MCP tools: `multi_search` · `extract_pages` · `gather` · `save_research` · `get_research` · `finish_research`
-- Distill any session into an LLM summary (background job) · Workspace Vision onboarding for new projects
+- **Self-hosted Deep Research engine** — multi-backend (Brave · SearXNG · DuckDuckGo · arXiv · Semantic Scholar · GitHub), fused ranking, iterative gap analysis, hybrid mode (Claude/Gemini brain + local hands), human-in-the-loop steering
+- **Deep Research plugin** with 6 MCP tools: search, extract, gather, save, query, finish
+- Distill any session into an LLM summary on demand · Workspace Vision onboarding for new projects
 
 ### 👫 Collaboration & multiplayer
-- One-shot **invites** in three projections of the same secret: 4-word EFF Long speakable · Crockford base32 compact (4-4-4) · base64url QR
-- Three modes — **Brief** (read-mostly + advisory) · **Code** (auto/plan only, allowlisted Bash) · **Full** (owner-equivalent, TTL-bounded)
-- Three enforcement layers: route guards · CLI flag injection at PTY start · hook-level tool denial
-- Joiner sessions with sliding TTL + 90-day hard cap; one-round-trip revocation
-- Mode pill in sidebar with logout
-- Cloudflare-tunnel mode (`npx ive --tunnel`) with red-text security banner
+- One-shot **invites** in three flavors of the same secret: 4-word speakable passcode · 12-character compact code · QR for in-person handoff
+- Three modes — **Brief** (read + advise) · **Code** (auto/plan only, allowlisted shell) · **Full** (owner-equivalent, TTL-bounded)
+- Three enforcement layers: route guards · CLI flag clamping · hook-level tool denial — a curious joiner can't escape any of them
+- Joiner sessions with sliding TTL and a 90-day hard cap; one-click revoke
+- Mode pill in the sidebar with logout
+- Tunneled multiplayer mode (`npx ive --tunnel`) with a red-text security banner so nobody forgets the URL is live
 
 ### 📱 Mobile, PWA & push
-- Add-to-Home-Screen on iOS + Android (manifest + service worker)
-- Cache-first app shell, network-first for `/api/*` (never cached)
-- **Web Push** via VAPID — opt-in; LAN-HTTP installs degrade gracefully to in-app banners
-- Mobile install prompt with iOS instructions vs Android `beforeinstallprompt`
+- Add-to-Home-Screen on iOS + Android — full PWA with service worker
+- App shell cached for instant loads; live data never cached
+- **Web Push** for off-screen alerts when an agent stalls — opt-in, with graceful in-app fallback
+- Smart install prompt: iOS instructions for iOS, native install for Android
 - Full xterm fidelity in your pocket — same shortcuts, same agents, same memory
 
 <p align="center">
@@ -243,50 +257,50 @@ The 5 pillars above are the elevator pitch. Here's the inventory.
 
 ### 🛠️ Workflow & day-to-day UX
 - **Feature Board** Kanban (backlog → todo → planning → in_progress → review → done) with full event history, attachments, and an Excalidraw scratchpad per ticket
-- **Quick Feature drop** with voice input (Web Speech API)
-- **Screenshot annotator** — rectangles, arrows, text → send straight to session
+- **Quick Feature drop** with voice input — speak a feature into existence
+- **Screenshot annotator** — rectangles, arrows, text → send straight to a session
 - **Live Preview** — URL input + on-the-fly screenshot capture
-- **Code Review** panel — git diff with file tree, search, annotations, IDE integration
-- Per-terminal scratchpads (auto-persisted)
-- Terminal annotation by ownership (Claude vs you), inline @-token chips, image paste from clipboard
-- **30+ configurable hotkeys** (rebindable in `keybindings.js`) · spatial grid navigation (⌃⌥←↑→↓)
-- Grid layout templates · session templates · history import from `~/.claude/projects/`
+- **Code Review** panel — diff with file tree, search, inline annotations, IDE handoff
+- Per-terminal scratchpads, auto-saved
+- Terminal annotation by ownership (agent vs you), inline @-token chips, paste images from clipboard
+- **40+ rebindable hotkeys** · spatial grid navigation (⌃⌥←↑→↓)
+- Grid layout templates · session templates · import existing Claude history with one click
 
 ### 🧩 Plugins, skills & extensibility
 - Plugin Marketplace with multiple registries; one-click install/uninstall
-- Plugin **importer** auto-detects Claude plugins / Gemini extensions / standalone skills / GitHub repos
-- Plugin **exporter** translates canonical → native CLI formats
-- LLM-assisted plugin **translator** for edge cases — live-cached docs (1 h TTL), confidence scoring, validation loop
-- **8000+ skill catalog baked in** (`skills_catalog.json`) — browse offline
-- MCP servers for **Commander · Worker · Documentor** (stdio JSON-RPC)
+- **Importer** auto-detects Claude plugins, Gemini extensions, standalone skills, and GitHub repos
+- **Exporter** translates canonical plugins back into native CLI formats
+- LLM-assisted **translator** for edge cases — live-cached docs, confidence scoring, validation loop
+- **8,000+ skill catalog baked in** — browse offline
+- MCP servers for **Commander · Worker · Documentor**
 - **Guidelines** as reusable system-prompt fragments, attachable per session
-- **Output Styles** — `lite` / `caveman` / `ultra` / `dense` token-saving modes; cascading session → workspace → global
+- **Output Styles** — `lite` / `caveman` / `ultra` / `dense` token-saving modes; cascade session → workspace → global
 
 ### 🔐 Security, accounts & supply chain
-- **Account auto-rotation** — catches `quota_exceeded`, picks the next OAuth account in LRU order, refreshes via headless Playwright when the snapshot is > 1 h old, swaps `sessions.account_id`, and the frontend auto-restarts the PTY 1.5 s later
-- OAuth **account sandboxing** — separate `HOME` per account with snapshotted `.claude/` and dotfile symlinks
-- Visible Playwright `auth login` flow inside the sandbox — real OAuth URLs (claude.ai for Max/Pro, console.anthropic.com for API, Google for Gemini)
-- `AuthContext` as single source of truth; HttpOnly + `SameSite=Strict` cookies; SHA-256-hashed tokens; `hmac.compare_digest` everywhere
-- CSP, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, Referrer-Policy, Permissions-Policy middleware
-- Rate limits on `/api/auth/*`, `/api/invite/*`, `/api/devices/*`, `/api/push/*`
-- Bundled **Anti-Vibe-Code-Pwner** — supply-chain scanner with a 9-step deep scan per package (npm, pip, GitHub Actions, MCP); PreToolUse hook intercepts installs before they run
+- **Account auto-rotation** — when one quota empties, IVE swaps to the next account, refreshes its tokens headlessly, and restarts the session 1.5 s later. The agent doesn't notice. The PR ships.
+- OAuth **account sandboxing** — separate `HOME` per account so plans never bleed into each other
+- Visible browser flow runs the CLI's real `auth login` inside the sandbox — actual OAuth URLs, no fake login pages
+- Single auth context for every request; HttpOnly + strict-SameSite cookies; tokens hashed at rest; constant-time comparisons everywhere
+- CSP, frame deny, MIME sniff lockdown, Referrer-Policy, Permissions-Policy — set by middleware, not opt-in
+- Rate limits on every auth, invite, device-pairing, and push endpoint
+- Bundled **Anti-Vibe-Code-Pwner** — supply-chain scanner with a 9-step deep scan per package (npm, pip, GitHub Actions, MCP); intercepts installs *before* they run
 
 ### 🔌 Event bus & integrations
-- Central event bus: **persist → notify in-process subscribers → broadcast WS → deliver webhooks**
-- Typed `CommanderEvent` enum covering tasks, sessions, workspaces, plugins, research, captures, MCP tool calls
-- Custom event subscriptions (your own webhooks)
-- **Hook-based state detection** — no ANSI parsing; structured JSON from CLI hooks for session lifecycle, tool execution, subagents, compaction
-- Single multiplexed `/ws` for PTY I/O + control messages
+- Central event bus: **persist → notify subscribers → broadcast over WebSocket → deliver webhooks**
+- Typed events for tasks, sessions, workspaces, plugins, research, captures, MCP tool calls — every state change emits one
+- Custom event subscriptions — wire IVE into your own webhooks
+- **Hook-based state detection** — structured JSON from your CLI's hooks; no flaky ANSI parsing
+- Single multiplexed WebSocket for terminal I/O + control messages
 
-> **By the numbers:** 140+ REST routes · 30+ Python modules · 79 frontend source files · 30+ keyboard shortcuts · 4 pipeline presets · 8000+ skills · 1 owner, ∞ collaborators.
+> **By the numbers:** 140+ API routes · 40+ rebindable hotkeys · 35+ MCP tools · 4 pipeline presets · 8,000+ skills · 1 owner, ∞ collaborators.
 
 ## 🏗️ Under the hood
 
-- **Backend** — Python aiohttp on `:5111`. 140+ REST routes, single multiplexed WebSocket, real PTYs (`os.fork()` + `pty.openpty()`).
+- **Backend** — Python aiohttp on `:5111`. 140+ REST routes, one multiplexed WebSocket, real PTYs (full terminal fidelity, not pseudo-emulation).
 - **Frontend** — React 19 + Vite 8 + xterm.js on `:5173`. Zustand state, Tailwind v4 dark theme.
-- **Data** — SQLite at `~/.ive/data.db`. No cloud, no telemetry of your code.
-- **Three-layer CLI abstraction** — vocabulary → unified session facade → per-CLI profile. New CLI = one profile.
-- **Central event bus** — every state change emits typed events; subscribers, WebSocket broadcast, and webhooks all branch off the same dispatcher.
+- **Data** — SQLite, local. No cloud, no telemetry of your code.
+- **Three-layer CLI abstraction** — vocabulary → unified session facade → per-CLI profile. Adding a new CLI is a one-file profile drop.
+- **Central event bus** — every state change emits a typed event; subscribers, WebSocket broadcast, and webhooks all branch off the same dispatcher.
 
 ## 🛠️ Manual run
 
