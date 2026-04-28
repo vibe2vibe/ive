@@ -211,10 +211,15 @@ function CreateInviteForm({ onCreated, onCancel }) {
   )
 }
 
-function NewInviteResult({ invite, onDone }) {
+function NewInviteResult({ invite, onDone, tunnelOrigin }) {
   const [showUrl, setShowUrl] = useState(false)
-  const origin = typeof window !== 'undefined' ? window.location.origin : ''
-  const host = typeof window !== 'undefined' ? window.location.host : ''
+  const localOrigin = typeof window !== 'undefined' ? window.location.origin : ''
+  // When a public tunnel is active, the QR / magic link MUST encode the
+  // public URL — phones scanning a localhost QR can't reach it. Falls back
+  // to window.location.origin (LAN / mDNS) when no tunnel is up.
+  const origin = tunnelOrigin || localOrigin
+  let host = ''
+  try { host = origin ? new URL(origin).host : '' } catch { host = '' }
   const joinPlain = `${origin}/join`
   const joinMagic = `${origin}/join?t=${encodeURIComponent(invite.secret_qr)}`
   const isLocalhost = /^(localhost|127\.|0\.0\.0\.0|\[::1\])/.test(host)
@@ -353,6 +358,7 @@ export default function InvitesPanel({ onClose }) {
   const [justCreated, setJustCreated] = useState(null)
   const [revoking, setRevoking] = useState(null)
   const [error, setError] = useState(null)
+  const [tunnelOrigin, setTunnelOrigin] = useState(null)
 
   const reload = useCallback(async () => {
     try {
@@ -368,6 +374,15 @@ export default function InvitesPanel({ onClose }) {
 
   useEffect(() => {
     reload()
+    // Pull tunnel state so QRs encode the public URL when a tunnel is up.
+    api.getRuntimeStatus()
+      .then((s) => {
+        const url = s?.tunnel?.running ? s?.tunnel?.url : null
+        if (!url) { setTunnelOrigin(null); return }
+        try { setTunnelOrigin(new URL(url).origin) }
+        catch { setTunnelOrigin(null) }
+      })
+      .catch(() => setTunnelOrigin(null))
   }, [reload])
 
   const handleCreated = async (created) => {
@@ -425,7 +440,7 @@ export default function InvitesPanel({ onClose }) {
           )}
 
           {justCreated && (
-            <NewInviteResult invite={justCreated} onDone={() => setJustCreated(null)} />
+            <NewInviteResult invite={justCreated} onDone={() => setJustCreated(null)} tunnelOrigin={tunnelOrigin} />
           )}
 
           {creating ? (

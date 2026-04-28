@@ -16534,9 +16534,11 @@ def create_app() -> web.Application:
     # rejected before token auth even runs), then token auth, then audit
     # (so it sees the resolved AuthContext), then CSP (so headers land
     # on every response that flows back through).
-    middlewares = [cors_middleware, rate_limit_middleware]
-    if AUTH_TOKEN:
-        middlewares.append(token_auth_middleware)
+    # token_auth_middleware is ALWAYS installed — it self-no-ops when
+    # AUTH_TOKEN is None (line ~13796) and enforces when it's set. This
+    # lets `Start tunnel` at runtime mint a token and have it actually
+    # gate requests, since the middleware chain is frozen at app creation.
+    middlewares = [cors_middleware, rate_limit_middleware, token_auth_middleware]
     middlewares.append(audit_middleware)
     middlewares.append(csp_middleware)
     app = web.Application(middlewares=middlewares)
@@ -16553,8 +16555,11 @@ def create_app() -> web.Application:
         return _route_guards.owner_only(handler)
 
     app.router.add_get("/ws", ws_handler)
-    if AUTH_TOKEN:
-        app.router.add_post("/auth", auth_login)
+    # /auth is always mounted — when AUTH_TOKEN is empty, the handler
+    # itself short-circuits. Mounting unconditionally lets a runtime
+    # tunnel-start (which auto-mints AUTH_TOKEN) immediately accept
+    # logins from the public URL.
+    app.router.add_post("/auth", auth_login)
 
     # Invite routes (access overhaul PR 1)
     # Mint + revoke are owner-only — joiners must never escalate themselves.
@@ -17027,38 +17032,112 @@ def create_app() -> web.Application:
             proxy_localhost_disabled,
         )
 
-    # ── Static frontend serving (production mode) ──────────────────
-    # When a built frontend exists, serve it directly from the backend.
-    # In dev mode the Vite dev server handles the frontend separately
-    # and this block is skipped (frontend/dist/ won't exist).
+    # ── Static frontend serving (always mounted) ──────────────────────
+    # The handlers below are registered unconditionally so a runtime
+    # tunnel-start (no `--multiplayer` at boot) can serve the frontend
+    # over the tunnel without a server restart.
+    #
+    # Behavior at request time:
+    #   - If `frontend/dist/` exists → serve the built file.
+    #   - Else if Vite is up on :5173 → reverse-proxy to it (dev mode).
+    #     This keeps `./start.sh` (no flags) working through a runtime
+    #     tunnel: the tunnel exposes the backend on :5111, and the
+    #     backend transparently forwards non-API/WS/preview paths to
+    #     the Vite dev server so the visitor sees the same UI you do
+    #     locally on :5173.
+    #   - Else → 503 with a clear "build the frontend" message.
     from resource_path import project_root as _project_root
     _dist = _project_root() / "frontend" / "dist"
-    if _dist.is_dir():
-        _index = _dist / "index.html"
+    _vite_origin = "http://127.0.0.1:5173"
+    _NO_FRONTEND_MSG = (
+        "<!doctype html><meta charset=utf-8><title>IVE — frontend not running</title>"
+        "<style>body{font-family:system-ui;max-width:36rem;margin:4rem auto;"
+        "padding:1.5rem;background:#0a0a0a;color:#e4e4e7;border:1px solid #27272a;"
+        "border-radius:8px}code{background:#18181b;padding:.15rem .35rem;"
+        "border-radius:4px;color:#a1a1aa}h2{margin-top:0;color:#fafafa}</style>"
+        "<h2>IVE backend reachable, but no frontend</h2>"
+        "<p>Either run <code>npm run build</code> in <code>frontend/</code> to "
+        "ship the production bundle, or start <code>npm run dev</code> on "
+        "<code>:5173</code> so the backend can proxy to it.</p>"
+    )
 
-        async def _serve_manifest(request: web.Request) -> web.Response:
-            f = _dist / "manifest.webmanifest"
-            if f.is_file():
-                return web.FileResponse(
-                    f, headers={"Content-Type": "application/manifest+json"},
-                )
-            return web.Response(status=404)
+    async def _try_proxy_vite(request: web.Request, sub_path: str):
+        """Reverse-proxy `request` to Vite's dev server. Returns None if Vite
+        isn't reachable so the caller can fall through to the 503 message."""
+        sess: aiohttp.ClientSession = request.app.get("preview_proxy_session")
+        if sess is None:
+            sess = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=_PREVIEW_PROXY_TIMEOUT),
+                auto_decompress=False,
+            )
+            request.app["preview_proxy_session"] = sess
+        upstream_url = f"{_vite_origin}/{sub_path}"
+        if request.query_string:
+            upstream_url = f"{upstream_url}?{request.query_string}"
+        upstream_headers: dict[str, str] = {}
+        for name, value in request.headers.items():
+            lname = name.lower()
+            if lname in _PREVIEW_PROXY_STRIP_REQ_HEADERS:
+                continue
+            if lname.startswith("cf-"):
+                continue
+            upstream_headers[name] = value
+        upstream_headers["Host"] = "127.0.0.1:5173"
+        # Vite WS (HMR) — return 501 like the preview proxy does for now.
+        if request.headers.get("Upgrade", "").lower() == "websocket":
+            return web.json_response(
+                {"error": "vite HMR websocket proxying not yet implemented"},
+                status=501,
+            )
+        try:
+            up = await sess.request(
+                request.method, upstream_url, headers=upstream_headers,
+                data=request.content if request.method not in {"GET","HEAD","OPTIONS"} else None,
+                allow_redirects=False,
+            )
+        except (aiohttp.ClientConnectorError, aiohttp.ServerDisconnectedError, asyncio.TimeoutError):
+            return None
+        resp_headers: dict[str, str] = {}
+        for name, value in up.headers.items():
+            lname = name.lower()
+            if lname in _PREVIEW_PROXY_STRIP_RESP_HEADERS:
+                continue
+            resp_headers[name] = value
+        body = await up.read()
+        up.release()
+        return web.Response(status=up.status, headers=resp_headers, body=body)
 
-        async def _serve_sw(request: web.Request) -> web.Response:
-            f = _dist / "sw.js"
-            if f.is_file():
-                return web.FileResponse(
-                    f,
-                    headers={
-                        "Content-Type": "application/javascript",
-                        "Service-Worker-Allowed": "/",
-                        "Cache-Control": "no-cache",
-                    },
-                )
-            return web.Response(status=404)
+    async def _serve_manifest(request: web.Request) -> web.Response:
+        f = _dist / "manifest.webmanifest"
+        if f.is_file():
+            return web.FileResponse(
+                f, headers={"Content-Type": "application/manifest+json"},
+            )
+        proxied = await _try_proxy_vite(request, "manifest.webmanifest")
+        if proxied is not None:
+            return proxied
+        return web.Response(status=404)
 
-        async def _spa_fallback(request: web.Request) -> web.Response:
-            path = request.match_info.get("_path", "")
+    async def _serve_sw(request: web.Request) -> web.Response:
+        f = _dist / "sw.js"
+        if f.is_file():
+            return web.FileResponse(
+                f,
+                headers={
+                    "Content-Type": "application/javascript",
+                    "Service-Worker-Allowed": "/",
+                    "Cache-Control": "no-cache",
+                },
+            )
+        proxied = await _try_proxy_vite(request, "sw.js")
+        if proxied is not None:
+            return proxied
+        return web.Response(status=404)
+
+    async def _spa_fallback(request: web.Request) -> web.StreamResponse:
+        path = request.match_info.get("_path", "")
+        if _dist.is_dir():
+            _index = _dist / "index.html"
             if path:
                 candidate = (_dist / path).resolve()
                 if candidate.is_file() and str(candidate).startswith(
@@ -17066,12 +17145,30 @@ def create_app() -> web.Application:
                 ):
                     return web.FileResponse(candidate)
             return web.FileResponse(_index)
+        # No built frontend — try Vite, otherwise show install hint.
+        proxied = await _try_proxy_vite(request, path)
+        if proxied is not None:
+            return proxied
+        return web.Response(
+            status=503, content_type="text/html", text=_NO_FRONTEND_MSG,
+        )
 
+    if (_dist / "assets").is_dir():
         app.router.add_static("/assets", _dist / "assets")
-        # Explicit MIME-aware handlers for PWA infra (PR 5).
-        app.router.add_get("/manifest.webmanifest", _serve_manifest)
-        app.router.add_get("/sw.js", _serve_sw)
-        app.router.add_get("/{_path:.*}", _spa_fallback)
+    else:
+        # Proxy /assets/* to Vite when no dist build is present, so the
+        # frontend's <script src="/assets/...">-style imports resolve.
+        async def _assets_proxy(request: web.Request) -> web.StreamResponse:
+            path = request.match_info.get("path", "")
+            proxied = await _try_proxy_vite(request, f"assets/{path}")
+            if proxied is not None:
+                return proxied
+            return web.Response(status=404)
+        app.router.add_get("/assets/{path:.*}", _assets_proxy)
+
+    app.router.add_get("/manifest.webmanifest", _serve_manifest)
+    app.router.add_get("/sw.js", _serve_sw)
+    app.router.add_get("/{_path:.*}", _spa_fallback)
 
     return app
 
