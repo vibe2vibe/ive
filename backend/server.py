@@ -454,21 +454,32 @@ async def _flush_output(session_id: str):
         raw = held
 
     # During the initial-render window, drop everything before the LAST
-    # full-screen-clear so Claude's pre-resize banner doesn't end up in
-    # scrollback alongside the post-resize one. After the window expires,
-    # we leave \x1b[2J alone — clears outside the startup window are
-    # legitimately user-visible (e.g. a /clear command).
+    # "fresh-frame boundary" so Claude's pre-resize banner doesn't pile
+    # up in xterm's scrollback alongside the post-resize one.
+    #
+    # Claude Code does NOT emit \x1b[2J (verified empirically — count=0
+    # across a full startup capture). Its rendering strategy is cursor-
+    # home (\x1b[H) followed by paint-over. So \x1b[H is the only
+    # available frame boundary; collapsing to the last one drops the
+    # earlier render's bytes before they reach xterm.
+    #
+    # We still also accept \x1b[2J as a boundary for tools that DO emit
+    # it (Gemini and any non-Claude future CLI). After the window
+    # expires, both sequences pass through untouched — clears outside
+    # the startup window are legitimate.
     start_t = _pty_start_time.get(session_id)
     if start_t is not None:
         if (_time.time() - start_t) * 1000 < _INITIAL_COLLAPSE_MS:
-            last_clear = raw.rfind(b"\x1b[2J")
-            if last_clear > 0:
-                # Bytes ahead of the last clear are about to be erased
-                # by xterm anyway — but they get pushed into scrollback
-                # first. Dropping them here keeps scrollback clean.
-                # Reset the UTF-8 decoder since we may have just thrown
+            # Take whichever comes later (the actual most-recent frame
+            # boundary). Position 0 doesn't count — that's the start of
+            # a single-render stream and there's nothing to drop.
+            last_2j = raw.rfind(b"\x1b[2J")
+            last_h  = raw.rfind(b"\x1b[H")
+            last_boundary = max(last_2j, last_h)
+            if last_boundary > 0:
+                raw = raw[last_boundary:]
+                # Reset the UTF-8 decoder — we may have just thrown
                 # away continuation bytes it was waiting on.
-                raw = raw[last_clear:]
                 _output_decoders.pop(session_id, None)
         else:
             _pty_start_time.pop(session_id, None)
@@ -1701,6 +1712,18 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
                         # resize effect handles SIGWINCH separately.
                         cached = pty_mgr.get_cached_output(session_id)
                         if cached:
+                            # Collapse to the last fresh-frame boundary so a
+                            # rolling cache that accumulated multiple banner
+                            # repaints (initial render + resize redraws + any
+                            # subsequent /clear) doesn't pile them all into
+                            # the new viewer's scrollback. Claude uses \x1b[H,
+                            # other CLIs may use \x1b[2J — take whichever
+                            # comes later.
+                            last_2j = cached.rfind(b"\x1b[2J")
+                            last_h  = cached.rfind(b"\x1b[H")
+                            last_boundary = max(last_2j, last_h)
+                            if last_boundary > 0:
+                                cached = cached[last_boundary:]
                             try:
                                 await ws.send_json({
                                     "session_id": session_id,
