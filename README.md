@@ -95,11 +95,7 @@ A walk through what makes IVE different. Each section is a feature you can use t
 
 ---
 
-### 🎯 Orchestration
-
-<a href="https://ive.dev/#orchestration"><img src="docs/screenshots/landing/orchestration.png" alt="Orchestration banner" width="100%"></a>
-
-> **One brain. Infinite hands.**
+<a href="https://ive.dev/#orchestration"><img src="docs/screenshots/landing/banner-orchestration.png" alt="Orchestration — One brain. Infinite hands." width="100%"></a>
 
 **Stop babysitting agents.** A meta-agent called *Commander* dispatches workers, assigns tickets, and monitors progress. Visual *Pipelines* wire them into autonomous workflows. *RALPH Mode* iterates Execute → Verify → Fix until tests pass. The *Feature Board* auto-dispatches tasks the moment a ticket hits *In Progress*.
 
@@ -107,11 +103,7 @@ A walk through what makes IVE different. Each section is a feature you can use t
 
 ---
 
-### 🧠 Intelligence
-
-<a href="https://ive.dev/#intelligence"><img src="docs/screenshots/landing/intelligence.png" alt="Intelligence banner" width="100%"></a>
-
-> **Remember. Research. Learn.**
+<a href="https://ive.dev/#intelligence"><img src="docs/screenshots/landing/banner-intelligence.png" alt="Intelligence — Remember. Research. Learn." width="100%"></a>
 
 **Agents shouldn't have amnesia.** A self-hosted *Deep Research* engine fans out across DuckDuckGo, arXiv, Semantic Scholar, and GitHub — no API keys required. A hub-and-spoke *Memory* layer keeps every session in sync via three-way git merge. The built-in marketplace ships with 8,000+ skills, browsable offline.
 
@@ -119,11 +111,7 @@ A walk through what makes IVE different. Each section is a feature you can use t
 
 ---
 
-### 🤝 Collaboration
-
-<a href="https://ive.dev/#collaboration"><img src="docs/screenshots/landing/collaboration.png" alt="Collaboration banner" width="100%"></a>
-
-> **Multiple agents. Zero conflicts.**
+<a href="https://ive.dev/#collaboration"><img src="docs/screenshots/landing/banner-collaboration.png" alt="Collaboration — Multiple agents. Zero conflicts." width="100%"></a>
 
 **Two agents, one repo, no chaos.** File-level coordination prevents simultaneous overwrites. A central event bus pipes every tool call, every commit, every pipeline transition through a single audit trail. Workers see each other's intent before they ever touch the same surface.
 
@@ -131,11 +119,7 @@ A walk through what makes IVE different. Each section is a feature you can use t
 
 ---
 
-### 🌐 Multiplayer
-
-<a href="https://ive.dev/#multiplayer"><img src="docs/screenshots/landing/multiplayer.png" alt="Multiplayer banner" width="100%"></a>
-
-> **Bring your team. Keep your keys.**
+<a href="https://ive.dev/#multiplayer"><img src="docs/screenshots/landing/banner-multiplayer.png" alt="Multiplayer — Bring your team. Keep your keys." width="100%"></a>
 
 **Hand a friend a 4-word invite.** They land in your agent army with clamped access — *Brief* (read + comment), *Code* (drive sessions, no shell), or *Full* (TTL-bounded owner). Your API keys never leave your machine. Three layers of enforcement: route guards, CLI flag injection, and PreToolUse hooks.
 
@@ -143,11 +127,7 @@ A walk through what makes IVE different. Each section is a feature you can use t
 
 ---
 
-### 📰 Catch-Up
-
-<a href="https://ive.dev/#catchup"><img src="docs/screenshots/landing/catchup.png" alt="Catch-Up banner" width="100%"></a>
-
-> **Never miss anything.**
+<a href="https://ive.dev/#catchup"><img src="docs/screenshots/landing/banner-catchup.png" alt="Catch-Up — Never miss anything." width="100%"></a>
 
 **Step away for an hour. Or a week.** Come back to a 2–5 sentence prose briefing of what your agents shipped, what your team committed, and what your memory hub learned — merged from the event bus, git log, and memory diffs in a single LLM call. The stale-session banner shows up automatically when you've been gone too long.
 
@@ -155,11 +135,7 @@ A walk through what makes IVE different. Each section is a feature you can use t
 
 ---
 
-### 🔗 Workflows & Prompts
-
-<a href="https://ive.dev/#workflows"><img src="docs/screenshots/landing/workflows.png" alt="Workflows banner" width="100%"></a>
-
-> **Compose once. Chain forever.**
+<a href="https://ive.dev/#workflows"><img src="docs/screenshots/landing/banner-workflows.png" alt="Workflows & Prompts — Compose once. Chain forever." width="100%"></a>
 
 **Your prompt library becomes a programming language.** Save templates with `@prompt:Name` tokens. Chain them into *cascades* with variables, loops, and auto-approval. Dial output verbosity per session with output styles. The same prompt that fixed a bug last Tuesday is one keystroke away today.
 
@@ -167,11 +143,7 @@ A walk through what makes IVE different. Each section is a feature you can use t
 
 ---
 
-### 🪟 Session Mastery
-
-<a href="https://ive.dev/#sessions"><img src="docs/screenshots/landing/sessions.png" alt="Sessions banner" width="100%"></a>
-
-> **tmux wishes it could do this.**
+<a href="https://ive.dev/#sessions"><img src="docs/screenshots/landing/banner-sessions.png" alt="Session Mastery — tmux wishes it could do this." width="100%"></a>
 
 **Twenty terminals, zero panic.** Visual grid layouts that remember themselves. Session merging. Broadcast keystrokes to a group. A multi-line composer with markdown structure for when you need to send something more than `yes`. Tabs stay mounted when you switch — no scroll loss, no state reset.
 
@@ -179,11 +151,7 @@ A walk through what makes IVE different. Each section is a feature you can use t
 
 ---
 
-### 🛠 Developer Tools
-
-<a href="https://ive.dev/#devtools"><img src="docs/screenshots/landing/devtools.png" alt="Developer Tools banner" width="100%"></a>
-
-> **See everything. Annotate anything.**
+<a href="https://ive.dev/#devtools"><img src="docs/screenshots/landing/banner-devtools.png" alt="Developer Tools — See everything. Annotate anything." width="100%"></a>
 
 **Code review built in.** Inline git-diff annotations. Voice-narrated browser screenshots. Live previews of your dev server. AI code review on demand. 40+ keyboard shortcuts so your hands never leave the keys.
 
@@ -191,15 +159,11 @@ A walk through what makes IVE different. Each section is a feature you can use t
 
 ---
 
-### 🛡 Security
+<a href="https://ive.dev/#security"><img src="docs/screenshots/landing/banner-security.png" alt="Security — Ship fast. Stay safe." width="100%"></a>
 
-<a href="https://ive.dev/#security"><img src="docs/screenshots/landing/security.png" alt="Security banner" width="100%"></a>
+**Defense at every layer, never bolted on.** *Anti-Vibe-Code-Pwner* scans every package install for supply-chain attacks before the agent executes it. Worktrees isolate experiments from your main checkout. Constant-time token comparison, HttpOnly + SameSite cookies, and a strict CSP guard the auth path. Three enforcement layers (route guards, CLI flag injection, PreToolUse hooks) clamp every joiner action.
 
-> **Ship fast. Stay safe.**
-
-**Defense at every layer, never bolted on.** *Anti-Vibe-Code-Pwner* scans every package install for supply-chain attacks before the agent executes it. Worktrees isolate experiments from your main checkout. Per-account sandboxes keep OAuth tokens contained. Constant-time token comparison and HttpOnly cookies on the auth path.
-
-`🛡 AVCP Scanner` · `🌳 Isolated Worktrees` · `🔐 Account Sandboxes` · `🧱 Defense-in-Depth`
+`🛡 AVCP Scanner` · `🌳 Isolated Worktrees` · `🔐 Constant-Time Auth` · `🧱 Defense-in-Depth`
 
 ---
 
@@ -212,7 +176,7 @@ IVE is designed to be lightweight, local-first, and highly secure.
 * **Backend**: Python (`aiohttp`) spawning real PTY sessions via `os.fork()`. Handles 140+ REST routes and a single multiplexed WebSocket for realtime control.
 * **Frontend**: React 19 + Vite 8 + xterm.js. Zustand for state management, styled with Tailwind CSS v4.
 * **Data**: Local SQLite (`~/.ive/data.db`). **Zero external cloud dependencies.**
-* **Security**: API account sandboxing, constant-time token comparisons, built-in Anti-Vibe-Code-Pwner supply chain scanning.
+* **Security**: Constant-time token comparisons, HttpOnly + SameSite cookies, strict CSP, and built-in Anti-Vibe-Code-Pwner supply chain scanning.
 
 ---
 
