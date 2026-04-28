@@ -80,6 +80,14 @@ skills-lock.json
 *.dmg
 *.app
 *.exe
+*.pkg
+*.deb
+*.rpm
+*.AppImage
+*.snap
+*.msi
+out/
+release/
 target/
 
 # Marketing site upload scripts (contain Supabase service-role keys)

@@ -225,27 +225,29 @@ async function _drainCommandQueue(sessionId) {
         if (!getWs()) break
         firstInBatch = false
       }
-      // Multi-line content needs CLI-specific handling:
-      //   * Claude's Ink TUI auto-detects multi-line input as a paste.
-      //     The reliable path is to wrap the content in bracketed-paste
-      //     markers (\x1b[200~ ... \x1b[201~), then send a standalone \r
-      //     to submit. Heuristic timers were racy — the TUI sometimes
-      //     consumed the trailing \r as part of the paste, leaving the
-      //     message stuck in the input field. Mirrors the backend
-      //     Gemini injection in server.py.
-      //   * Gemini's TUI treats every \n as Enter (submits partial
-      //     lines), so we collapse newlines to spaces for it.
+      // Always send the text and the submit \r in *separate* frames with
+      // a delay between. Combining them into one frame works for short
+      // inputs but Claude's Ink TUI auto-detects bursts >~80 chars as a
+      // paste and absorbs a trailing \r into the paste body — leaving
+      // the message sitting unsubmitted in the prompt (the documentor /
+      // tester / commander auto-kickoff bug). Mirrors auto_exec.py's
+      // backend pattern (write text → sleep → write \r).
+      //
+      //   * Claude (Ink): bracketed-paste wrap for multi-line, raw text
+      //     for single-line; submit Enter is always its own frame.
+      //   * Gemini: every \n submits partial lines, so collapse newlines
+      //     to spaces; submit Enter is still its own frame.
       const isMulti = item.processed.includes('\n')
       if (!isMulti) {
-        sendRaw(sessionId, item.processed + '\r')
+        sendRaw(sessionId, item.processed)
       } else if (isGeminiSession(sessionId)) {
-        sendRaw(sessionId, item.processed.replace(/\r?\n/g, ' ') + '\r')
+        sendRaw(sessionId, item.processed.replace(/\r?\n/g, ' '))
       } else {
         sendRaw(sessionId, '\x1b[200~' + item.processed + '\x1b[201~')
-        await new Promise((r) => setTimeout(r, 300))
-        if (!getWs()) break
-        sendRaw(sessionId, '\r')
       }
+      await new Promise((r) => setTimeout(r, 300))
+      if (!getWs()) break
+      sendRaw(sessionId, '\r')
       await new Promise((r) => setTimeout(r, COMMAND_SPACING_MS))
     }
   } finally {
