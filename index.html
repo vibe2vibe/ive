@@ -573,7 +573,7 @@ a { color: var(--cyan); text-decoration: none; }
 }
 .cta-cmd {
   margin-top: 40px; position: relative; z-index: 1;
-  display: inline-block; padding: 18px 32px; border-radius: 12px;
+  display: inline-block; padding: 18px 100px 18px 32px; border-radius: 12px;
   background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
   font-family: var(--mono); font-size: 15px; color: var(--cyan);
   letter-spacing: 0.5px; text-align: left;
@@ -584,6 +584,17 @@ a { color: var(--cyan); text-decoration: none; }
 .cta-cmd .cmd-flag { color: var(--violet); }
 .cta-cmd .cmd-url { color: #94a3b8; }
 .cta-cmd .cmd-run { color: #22c55e; }
+.cta-cmd-copy {
+  position: absolute; top: 12px; right: 12px;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-radius: 8px;
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+  color: #94a3b8; font-family: var(--mono); font-size: 12px; letter-spacing: 0.5px;
+  cursor: pointer; transition: all 0.15s ease;
+}
+.cta-cmd-copy:hover { background: rgba(0,240,255,0.08); border-color: rgba(0,240,255,0.3); color: var(--cyan); }
+.cta-cmd-copy svg { width: 13px; height: 13px; }
+.cta-cmd-copy.copied { background: rgba(34,197,94,0.1); border-color: rgba(34,197,94,0.3); color: #22c55e; }
 
 /* ===== FOOTER ===== */
 footer {
@@ -1494,7 +1505,7 @@ footer p { font-size: 12px; color: #475569; letter-spacing: 1px; }
     <p class="beta-sub">No password. No invite list. Anonymous opt-out telemetry only (<code>IVE_TELEMETRY=off</code>). Clone the repo, run <code>./start.sh</code>, command your agents.</p>
     <p class="beta-sub" style="margin-top:14px;font-size:15px;color:#94a3b8;">This is an <strong style="color:#f59e0b;">Alpha</strong>. We&rsquo;re shipping fixes 24/7 &mdash; <a href="https://github.com/michael-ra/ive/issues" target="_blank" rel="noopener" style="color:var(--cyan);text-decoration:underline;">feedback &amp; bug reports</a> are deeply appreciated. Star the repo to follow along.</p>
 
-    <div class="release-event">Apache-2.0 &mdash; <span class="open-src">github.com/michael-ra/ive</span></div>
+    <div class="release-event">MIT &mdash; <span class="open-src">github.com/michael-ra/ive</span></div>
 
     <div class="hero-cta-row" style="margin-top:8px;">
       <a href="https://github.com/michael-ra/ive" class="btn btn-primary" target="_blank" rel="noopener">
@@ -1521,6 +1532,11 @@ footer p { font-size: 12px; color: #475569; letter-spacing: 1px; }
     <a href="https://github.com/michael-ra/ive#readme" class="btn btn-ghost" target="_blank" rel="noopener">Read the Docs</a>
   </div>
   <div class="cta-cmd reveal">
+    <button class="cta-cmd-copy" type="button" data-copy="git clone https://github.com/michael-ra/ive && cd ive
+./start.sh" aria-label="Copy commands">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      <span class="cta-cmd-copy-label">Copy</span>
+    </button>
     <span class="cmd-line"><span class="cmd-dollar">$</span> git clone <span class="cmd-url">https://github.com/michael-ra/ive</span> <span class="cmd-flag">&amp;&amp;</span> cd ive</span>
     <span class="cmd-line"><span class="cmd-dollar">$</span> <span class="cmd-run">./start.sh</span></span>
   </div>
@@ -1638,6 +1654,29 @@ if (vid) {
     document.addEventListener('click', () => vid.play(), { once: true });
   });
 }
+
+document.querySelectorAll('.cta-cmd-copy').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const text = btn.dataset.copy || '';
+    const label = btn.querySelector('.cta-cmd-copy-label');
+    const original = label ? label.textContent : 'Copy';
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch {}
+      document.body.removeChild(ta);
+    }
+    btn.classList.add('copied');
+    if (label) label.textContent = 'Copied';
+    setTimeout(() => {
+      btn.classList.remove('copied');
+      if (label) label.textContent = original;
+    }, 1600);
+  });
+});
 
 </script>
 </body>
